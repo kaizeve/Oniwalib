@@ -45,6 +45,21 @@ export class Writer {
     return this;
   }
 
+  /** Como `uint`, mas escreve MESMO sendo 0 — para campos `optional` (proto2)
+   *  que o WhatsApp espera presentes. */
+  uintF(field: number, value: number): this {
+    this.tag(field, WIRE.VARINT);
+    this.varint(value);
+    return this;
+  }
+
+  /** Como `bool`, mas escreve `false` explícito. */
+  boolF(field: number, value: boolean): this {
+    this.tag(field, WIRE.VARINT);
+    this.buf.push(value ? 1 : 0);
+    return this;
+  }
+
   bytes(field: number, value: Uint8Array | undefined): this {
     if (!value) return this;
     this.tag(field, WIRE.LEN);

@@ -6,9 +6,21 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
-    "test": "for f in version wire wabinary noise auth socket bot; do bun test/$f.test.ts || exit 1; done",
-    "test:rts": "for f in version wire wabinary noise auth socket bot; do ../rts/target/fast/rts run test/$f.test.ts || exit 1; done"
+    "test": "node scripts/tests.mjs",
+    "test:rts": "node scripts/tests.mjs --rts",
+    "bot": "bun examples/connect-bot.ts",
+    "bot:up": "npx --yes pm2 start ecosystem.config.cjs && npx --yes pm2 logs oni-bot",
+    "bot:restart": "npx --yes pm2 restart oni-bot --update-env",
+    "bot:down": "npx --yes pm2 delete oni-bot",
+    "bot:logs": "npx --yes pm2 logs oni-bot --lines 50",
+    "bot:status": "npx --yes pm2 status"
   },
   "author": "loveless",
-  "license": "SEE LICENSE IN LICENSE"
+  "license": "SEE LICENSE IN LICENSE",
+  "dependencies": {
+    "curve25519-js": "^0.0.4"
+  },
+  "devDependencies": {
+    "qrcode-terminal": "^0.12.0"
+  }
 }

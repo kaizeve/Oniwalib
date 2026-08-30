@@ -14,6 +14,13 @@ export interface Contact {
   name?: string;
 }
 
+/** Identidade Signal de um par (a conta principal, no pareamento). `identifierKey`
+ *  é a pública com o byte de tipo DJB (0x05) na frente. */
+export interface SignalIdentity {
+  identifier: { name: string; deviceId: number };
+  identifierKey: Uint8Array;
+}
+
 export interface AuthCreds {
   noiseKey: KeyPair; // estática do cliente no handshake Noise
   signedIdentityKey: KeyPair; // identidade Signal (Curve25519)
@@ -25,7 +32,8 @@ export interface AuthCreds {
   registrationId: number;
   advSecretKey: string; // base64 — usado no pareamento multi-device
   me?: Contact;
-  account?: unknown;
+  account?: unknown; // ADVSignedDeviceIdentity assinada, guardada após o pareamento
+  signalIdentities?: SignalIdentity[];
   platform?: string;
   registered: boolean;
   pairingCode?: string;
@@ -36,6 +44,7 @@ export interface AuthCreds {
 export type SignalDataType =
   | "pre-key"
   | "session"
+  | "identity-key"
   | "sender-key"
   | "app-state-sync-key"
   | "app-state-sync-version"

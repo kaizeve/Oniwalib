@@ -9,7 +9,7 @@ It talks the socket directly — no browser, no Puppeteer, no headless Chrome.
 
 <br>
 
-[![tests](https://img.shields.io/badge/tests-126%2F126%20passing-2ea44f?style=flat-square)](#tests)
+[![tests](https://img.shields.io/badge/tests-287%2F287%20passing-2ea44f?style=flat-square)](#tests)
 [![runtimes](https://img.shields.io/badge/runs%20on-bun%20%C2%B7%20node%20%C2%B7%20RTS-0b7285?style=flat-square)](#status)
 [![language](https://img.shields.io/badge/TypeScript-3178c6?style=flat-square&logo=typescript&logoColor=white)](#)
 [![status](https://img.shields.io/badge/status-early%20%C2%B7%20foundation-d9822b?style=flat-square)](#status)
@@ -107,14 +107,22 @@ doesn't need a cryptographic primitive the engine doesn't expose yet.
 | `noise/` | XX handshake + framing + `NoiseSocket` | ✅ | ✅ |
 | `crypto/` | `Crypto` interface + `node:crypto` adapter (bun/node) + RTS adapter | ✅ | ✅ |
 | `proto/` | own protobuf codec (no protobufjs) + message builders (buttons / list / interactive) + `HandshakeMessage` / `ClientPayload` wire | ✅ | ✅ |
-| `auth/` | credentials + Signal key store | ✅ | ✅¹ |
-| `transport/` | `Transport` interface + `MockTransport` | ✅ | ✅ |
+| `auth/` | credentials + Signal key store + signal identities | ✅ | ✅¹ |
+| `pairing.ts` | `configureSuccessfulPairing` — the `<pair-success>` crypto (HMAC + account/device signatures) | ✅ | ✅¹ |
+| `signal/` | native Double Ratchet + X3DH (1:1) **+ SenderKey group cipher (read)**, own session/sender-key records, pre-key upload — studied from libsignal, imports nothing | ✅ | ✅¹ |
+| `messages.ts` | decrypt `<message><enc>` (`pkmsg`/`msg` **and `skmsg` — group read**) → `messages.upsert`; `sendText` / `sendMessage` (1:1 reply); pre-keys after `<success>` | ✅ | ✅¹ |
+| `client.ts` | `openWhatsApp` — QR + pairing + `515` restart + login + keepalive/acks + message pipeline | ✅ | ✅² |
+| `transport/` | `Transport` interface + `MockTransport` + `WebSocketTransport` (bun/node) | ✅ | ✅ |
 | `events/` · `profiles/` | typed event surface · stock vs modified | ✅ | ✅ |
-| `transport/` — real connector | TLS + WebSocket client with custom headers / Origin | ⛔ | ⛔ |
+| `transport/` — RTS connector | TLS + WebSocket client with custom headers / Origin on the engine | ⛔ | ⛔ |
 
 <sub>¹ Identity signing (XEdDSA) isn't in RTS yet — on the engine, the
-`signedPreKey` carries a placeholder signature until Phase 2. Everything else
-runs native.</sub>
+`signedPreKey` carries a placeholder signature and `configureSuccessfulPairing`
+can't produce the device signature until Phase 2. On bun / node it's the real
+`curve25519-js` (same lib as Baileys) and pairing completes.</sub>
+
+<sub>² `client.ts` is tested on bun (`test/client.test.ts`, full pairing →
+`515` restart → login flow over the mock server); not yet run on RTS.</sub>
 
 ### Phase 0 — engine primitives
 
@@ -126,14 +134,25 @@ runs native.</sub>
 | Curve25519 signing (XEdDSA) | — | ⛔ pending (Phase 2) |
 
 With this, the Noise handshake and credential initialization run on the engine.
-What's left to actually connect is the transport layer (TLS + WebSocket client).
+What's left to actually connect **on RTS** is the transport layer (TLS +
+WebSocket client) and XEdDSA signing. On **bun / node** both are covered, so
+pairing works end to end there today — see `examples/pair.ts`.
 
 ### <a name="tests"></a>Tests
 
 `version` 11 · `wire` 24 (protobuf codec + `HandshakeMessage` / `ClientPayload`)
-· `wabinary` 23 · `noise` 12 · `auth` 22 · `socket` 6 · `bot` 28 (command
-dispatch + CPU/RAM monitor + end-to-end over the mock server) → **126 / 126 on
-bun AND on RTS**.
+· `wabinary` 29 · `e2e-message` 30 · `noise` 12 · `auth` 22 · `file-state` 18 ·
+`socket` 6 · `bot` 42 (command dispatch + CPU/RAM monitor + end-to-end over the
+mock server).
+
+Plus the Signal layer and everything bun-only for now: `signal` 13 (X3DH,
+Double Ratchet, re-key, out-of-order, MAC rejection — two in-memory parties, no
+server) · `sender-key` 17 (group cipher: SKDM distribution, in/out-of-order
+decrypt, replay + bad-signature rejection, serialization) · `prekeys` 18 ·
+`messages` 13 (incoming `pkmsg` → `messages.upsert` → `sendText` reply,
+decrypted back) · `pairing` 18 (the `<pair-success>` crypto both directions) ·
+`client` 14 (QR → pairing → `515` restart → login `<success>`, over the mock
+server) → **287 / 287 on bun**.
 
 ### <a name="oni-version"></a>Keeping it working — the oni-version
 
@@ -221,8 +240,27 @@ bun examples/bot.ts
         sistema 12 GB / 16 GB
 ```
 
-`OniBot` ships `!ping !status !mem !uptime !echo !help`; `bot.register(name,
-help, handler)` adds your own. `Monitor.sample()` gives the stats object.
+`OniBot` ships `!ping !status !mem !uptime !echo !table !buttons !list !menu
+!help`; `bot.register(name, help, handler)` adds your own. `!ping` reports the
+WhatsApp→bot latency (from the server timestamp); `!table` replies with a
+monospaced table; `!buttons` / `!list` send real `buttonsMessage` /
+`listMessage`, and a tap comes back as the button/row id — so a button whose id
+is `!ping` routes through the same handler as the typed command.
+`Monitor.sample()` gives the stats object.
+
+### Keeping a live bot running (`pm2`)
+
+`examples/connect-bot.ts` connects for real (QR the first time, session cached in
+`./oni-auth/`). `ecosystem.config.cjs` runs it under **pm2** with `watch` on
+`src/` and `examples/`, so every code change reloads the bot on the latest
+library — it reconnects from the cached session, no re-pair.
+
+```bash
+bun run bot          # foreground, first run — scan the QR
+npm run bot:up       # background via pm2 (bunx pm2, no global install) + tail logs
+npm run bot:restart  # manual reload
+npm run bot:down     # stop
+```
 
 ### Encode / decode a binary node
 
@@ -281,12 +319,18 @@ oniwalib/
 │   ├── proto/
 │   │   ├── wire.ts            minimal protobuf codec (varint, len-delimited, i32/i64)
 │   │   ├── message.ts         body builders: text, buttons, list, template, interactive
-│   │   ├── handshake.ts       ClientPayload types + buildClientPayload
-│   │   └── client-payload.ts  ClientPayload → protobuf bytes
+│   │   ├── handshake.ts       ClientPayload types + buildClientPayload (register + login)
+│   │   ├── client-payload.ts  ClientPayload → protobuf bytes
+│   │   └── adv.ts             ADV device-identity protobufs (pairing)
 │   ├── auth/
-│   │   └── state.ts           initAuthCreds, memoryAuthState, own base64
+│   │   ├── state.ts           initAuthCreds, memoryAuthState, own base64
+│   │   └── file-state.ts      fileAuthState — encrypted append-only credential store
+│   ├── pairing.ts             configureSuccessfulPairing — the <pair-success> crypto
+│   ├── connect.ts             connectOni — transport + Noise handshake, up to first stanza
+│   ├── client.ts              openWhatsApp — the connection driver (QR, pairing, 515, login)
 │   ├── transport/
 │   │   ├── types.ts           Transport interface + WhatsApp endpoints
+│   │   ├── websocket.ts       WebSocketTransport (bun / node)
 │   │   ├── mock.ts            in-memory transport pair (tests)
 │   │   └── mock-wa-server.ts  in-memory Noise responder + message relay (tests)
 │   ├── bot/
@@ -300,8 +344,12 @@ oniwalib/
 │   └── index.ts
 ├── oni-version.json           the current known-good WA version (edit to update)
 ├── examples/
-│   └── bot.ts                 basic bot: commands + CPU/RAM, over the mock server
-├── test/                      version · wire · wabinary · noise · auth · socket · bot
+│   ├── bot.ts                 basic bot: commands + CPU/RAM, over the mock server
+│   └── connect-bot.ts         the same bot on a real connection (QR + cached session)
+├── ecosystem.config.cjs       pm2: keep connect-bot.ts running, watch + reload on change
+├── scripts/
+│   └── tests.mjs              the test runner — runs the suite, syncs the README counts
+├── test/                      version · wire · wabinary · noise · auth · file-state · socket · signal · sender-key · bot · pairing · client
 ├── PUBLISH.md                 how to push and keep this repo updated
 ├── package.json · tsconfig.json · LICENSE · README.md
 ```
@@ -311,14 +359,21 @@ oniwalib/
 ## Development
 
 ```bash
-# reference runtime
+# one file, reference runtime
 bun test/wire.test.ts
 
-# the same tests on the target engine
+# the same file on the target engine
 ../rts/target/fast/rts run test/wire.test.ts
+
+# the whole suite (also rewrites the test counts in this README)
+npm test            # bun
+npm run test:rts    # RTS — runs the subset that the engine supports, no README write
 ```
 
 Running both and comparing is the "Baileys-shaped code works on RTS" test.
+`npm test` goes through `scripts/tests.mjs`: it runs every file, and when the
+bun suite is green it updates the badge and the **Tests** section above with the
+fresh numbers.
 
 ### Stock and modified
 

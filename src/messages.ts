@@ -1,0 +1,337 @@
+// A camada de mensagem — a cola entre a máquina de estados do WhatsApp
+// (`client.ts`) e a camada Signal (`signal/`). É o análogo do
+// `decrypt-wa-message` + trecho de `messages-send` da Baileys, no mínimo da
+// fase 1: conversa 1:1 em texto.
+//
+//   handleMessageStanza(node)  decifra cada <enc> (pkmsg/msg/skmsg), tira o
+//                              padding, decodifica o `Message`, emite
+//                              `messages.upsert`, e manda o <receipt> de entrega.
+//   sendText(jid, text)        cifra um `Message{conversation}` e envia
+//                              `<message><enc>`. Precisa de sessão já aberta
+//                              (responder quem mandou) — cold-send é fase 2.
+//   uploadPreKeys()            sobe 30 pré-chaves; chamado no <success> e quando
+//                              o servidor avisa que o estoque baixou.
+//
+// GRUPOS (LEITURA): a stanza de grupo traz dois <enc> — um pairwise
+// (pkmsg/msg) com o `SenderKeyDistributionMessage` que inicia/roda a cadeia do
+// remetente, e um `skmsg` com o conteúdo. Processamos o primeiro, guardamos o
+// `SenderKeyRecord` e deciframos o segundo. RESPONDER em grupo (criar o nosso
+// sender key + distribuir via USync/cold-send) continua sendo fase 2.
+//
+// O que a fase 1 ainda NÃO faz: enviar em grupo, retry receipts, USync, mídia.
+
+import type { Emitter } from "./events/emitter";
+import type { AuthenticationState } from "./auth/state";
+import type { Crypto } from "./crypto/types";
+import { node, getBinaryNodeChildren, type BinaryNode } from "./frame/node";
+import { jidDecode, isJidGroup } from "./frame/jid";
+import { encodeSignedDeviceIdentity, type ADVSignedDeviceIdentity } from "./proto/adv";
+import {
+  makeCurve,
+  makeSignalStorage,
+  encrypt as signalEncrypt,
+  decryptWhisperMessage,
+  decryptPreKeyWhisperMessage,
+  type SignalDeps,
+} from "./signal/index";
+import { buildPreKeyUploadNode } from "./signal/prekeys";
+import {
+  SenderKeyRecord,
+  processSenderKeyDistribution,
+  groupDecrypt,
+} from "./signal/sender-key";
+import { decodeE2EMessage, encodeE2EMessage, type E2EMessage } from "./proto/e2e-message";
+import type { MessageKey } from "./events/emitter";
+
+export interface MessagesLayerOptions {
+  events: Emitter;
+  auth: AuthenticationState;
+  crypto: Crypto;
+  /** Envia um node cru na conexão ativa. */
+  sendNode: (n: BinaryNode) => void;
+  /** Gera um id de stanza único. */
+  genId: () => string;
+  /** Persiste `auth.creds` (após upload de pré-chaves). */
+  saveCreds?: () => void | Promise<void>;
+}
+
+export interface MessagesLayer {
+  handleMessageStanza(stanza: BinaryNode): Promise<void>;
+  sendText(jid: string, text: string): Promise<{ id: string }>;
+  /** Cifra e envia um `Message` qualquer (texto, botões, lista, …). */
+  sendMessage(jid: string, msg: E2EMessage): Promise<{ id: string }>;
+  uploadPreKeys(range?: number): Promise<void>;
+  /** Servidor avisou que o estoque de pré-chaves baixou. */
+  onEncryptNotification(): Promise<void>;
+}
+
+const PREKEY_UPLOAD_COUNT = 30;
+
+export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
+  const { events, auth, crypto: c, sendNode, genId } = opts;
+  const deps: SignalDeps = {
+    c,
+    curve: makeCurve(c),
+    storage: makeSignalStorage(auth),
+  };
+
+  // Serializa TODAS as operações Signal — o Double Ratchet muta estado
+  // compartilhado (o record) e não é reentrante.
+  let chain: Promise<unknown> = Promise.resolve();
+  const serial = <T>(fn: () => Promise<T>): Promise<T> => {
+    const run = chain.then(fn, fn);
+    chain = run.catch(() => {});
+    return run;
+  };
+
+  const meUser = () => jidDecode(auth.creds.me?.id)?.user;
+  const sameUser = (a?: string, b?: string) => {
+    if (!a || !b) return false;
+    const da = jidDecode(a);
+    const db = jidDecode(b);
+    return !!da?.user && da.user === db?.user;
+  };
+
+  function signalAddress(jid: string): string {
+    const d = jidDecode(jid);
+    if (!d || !d.user) throw new Error("messages: jid inválido: " + jid);
+    const dt = d.domainType ?? 0;
+    const user = dt !== 0 ? `${d.user}_${dt}` : d.user;
+    return `${user}.${d.device ?? 0}`;
+  }
+
+  function unpad(e: Uint8Array): Uint8Array {
+    if (e.length === 0) throw new Error("unpad: bytes vazios");
+    const pad = e[e.length - 1]!;
+    if (pad === 0 || pad > e.length) throw new Error(`unpad: ${e.length} bytes, pad diz ${pad}`);
+    return e.subarray(0, e.length - pad);
+  }
+  function pad(msg: Uint8Array): Uint8Array {
+    const padLen = (c.randomBytes(1)[0]! & 0x0f) + 1;
+    const out = new Uint8Array(msg.length + padLen);
+    out.set(msg);
+    out.fill(padLen, msg.length);
+    return out;
+  }
+
+  const sendDeliveryReceipt = (stanza: BinaryNode) => {
+    const a = stanza.attrs;
+    if (!a.id || !a.from) return;
+    const attrs: Record<string, string> = { id: a.id, to: a.from };
+    if (a.participant) attrs.participant = a.participant;
+    try {
+      sendNode(node("receipt", attrs));
+    } catch {
+      /* conexão caiu — ignora */
+    }
+  };
+
+  // Falhou ao decifrar → pede pro remetente reenviar. É o mínimo (só
+  // `<registration>`); o bloco `<keys>` com identidade + pré-chave nova (para o
+  // remetente reabrir a sessão pairwise) é o próximo passo. Sem isso, um `skmsg`
+  // de uma distribuição anterior (SKDM que nunca chegou) fica ilegível.
+  const retryCounts = new Map<string, number>();
+  const sendRetryReceipt = (stanza: BinaryNode) => {
+    const a = stanza.attrs;
+    if (!a.id || !a.from) return;
+    const count = (retryCounts.get(a.id) ?? 0) + 1;
+    if (count > 5) return;
+    retryCounts.set(a.id, count);
+    const attrs: Record<string, string> = { id: a.id, type: "retry", to: a.from };
+    if (a.participant) attrs.participant = a.participant;
+    const be = (n: number, len: number) => {
+      const out = new Uint8Array(len);
+      let r = n;
+      for (let i = len - 1; i >= 0; i--) {
+        out[i] = r & 0xff;
+        r = Math.floor(r / 256);
+      }
+      return out;
+    };
+    try {
+      sendNode(
+        node("receipt", attrs, [
+          node("retry", { count: String(count), id: a.id, t: a.t ?? "0", v: "1" }),
+          node("registration", {}, be(auth.creds.registrationId, 4)),
+        ]),
+      );
+    } catch {
+      /* conexão caiu — ignora */
+    }
+  };
+
+  async function decryptEnc(type: string, addr: string, body: Uint8Array): Promise<Uint8Array> {
+    if (type === "pkmsg") return decryptPreKeyWhisperMessage(deps, addr, body);
+    if (type === "msg") return decryptWhisperMessage(deps, addr, body);
+    throw new Error(`tipo de <enc> não suportado na fase 1: ${type}`);
+  }
+
+  async function handleMessageStanza(stanza: BinaryNode): Promise<void> {
+    const a = stanza.attrs;
+    const from = a.from;
+    if (!from || !a.id) {
+      sendDeliveryReceipt(stanza);
+      return;
+    }
+
+    const isGroup = isJidGroup(from);
+    const author = a.participant || from;
+    const fromMe = isGroup
+      ? sameUser(a.participant, auth.creds.me?.id)
+      : sameUser(from, auth.creds.me?.id) && !!a.recipient;
+    const chatId = isGroup ? from : fromMe ? a.recipient! : from;
+    const addr = signalAddress(author);
+    const skName = `${from}::${addr}`;
+    // `t` do servidor, em segundos unix. Quem recebe usa para medir o atraso
+    // WhatsApp→bot (o `!ping` reporta isso como latência).
+    const messageTimestamp = a.t ? Number(a.t) : undefined;
+
+    const encNodes = getBinaryNodeChildren(stanza, "enc").filter(
+      (n) => n.content instanceof Uint8Array,
+    );
+    // pairwise antes de skmsg: o pkmsg/msg traz o SenderKeyDistributionMessage
+    // que o skmsg precisa para decifrar.
+    encNodes.sort((x, y) => rank(x.attrs.type) - rank(y.attrs.type));
+
+    const baseKey: MessageKey = {
+      remoteJid: chatId,
+      fromMe,
+      id: a.id,
+      ...(a.participant ? { participant: a.participant } : {}),
+    };
+
+    // Decodifica o plaintext e emite `messages.upsert` — a menos que seja só o
+    // SKDM de um pairwise de grupo (plumbing, sem conteúdo pra entregar).
+    const deliver = (plain: Uint8Array): E2EMessage => {
+      let msg: E2EMessage = decodeE2EMessage(plain);
+      if (msg.deviceSentMessage?.message) msg = msg.deviceSentMessage.message;
+      const bareSkdm =
+        isGroup &&
+        !!msg.senderKeyDistributionMessage &&
+        !msg.conversation &&
+        !msg.extendedTextMessage &&
+        !msg.buttonsMessage &&
+        !msg.listMessage &&
+        !msg.buttonsResponseMessage &&
+        !msg.listResponseMessage;
+      if (!bareSkdm) {
+        events.emit("messages.upsert", {
+          type: "notify",
+          messages: [{ key: baseKey, message: msg, messageTimestamp, pushName: a.notify }],
+        });
+      }
+      return msg;
+    };
+
+    // Uma stanza por vez: os ratchets mutam estado e não são reentrantes.
+    for (const enc of encNodes) {
+      const type = enc.attrs.type ?? "msg";
+      const body = enc.content as Uint8Array;
+      // eslint-disable-next-line no-await-in-loop
+      await serial(async () => {
+        try {
+          if (type === "skmsg") {
+            const rec = await loadSenderKey(skName);
+            const plain = unpad(groupDecrypt(c, rec, body));
+            await storeSenderKey(skName, rec);
+            deliver(plain);
+            return;
+          }
+
+          const plain = unpad(await decryptEnc(type, addr, body));
+          const msg = deliver(plain);
+
+          // Num grupo, o pairwise carrega o SKDM do remetente — guarda a cadeia.
+          const skdm = msg.senderKeyDistributionMessage?.axolotlSenderKeyDistributionMessage;
+          if (isGroup && skdm) {
+            const rec = await loadSenderKey(skName);
+            processSenderKeyDistribution(rec, skdm);
+            await storeSenderKey(skName, rec);
+          }
+        } catch (err) {
+          events.emit("messages.upsert", {
+            type: "notify",
+            messages: [{ key: baseKey, message: undefined, messageTimestamp }],
+          });
+          // eslint-disable-next-line no-console
+          console.error(
+            `messages: falha ao decifrar <enc type=${type}> de ${author}: ${(err as Error).message}`,
+          );
+          sendRetryReceipt(stanza);
+        }
+      });
+    }
+
+    sendDeliveryReceipt(stanza);
+  }
+
+  async function sendText(jid: string, text: string): Promise<{ id: string }> {
+    return sendMessage(jid, { conversation: text });
+  }
+
+  async function sendMessage(jid: string, msg: E2EMessage): Promise<{ id: string }> {
+    return serial(async () => {
+      const addr = signalAddress(jid);
+      const existing = await deps.storage.loadSession(addr);
+      if (!existing || !existing.getOpenSession()) {
+        throw new Error(
+          `sendMessage: sem sessão com ${jid}. Na fase 1 dá para responder quem já ` +
+            `mandou mensagem; cold-send (buscar bundle) é fase 2.`,
+        );
+      }
+
+      const plaintext = pad(encodeE2EMessage(msg));
+      const { type, body } = await signalEncrypt(deps, addr, plaintext);
+      const encType = type === 3 ? "pkmsg" : "msg";
+
+      const content: BinaryNode[] = [node("enc", { v: "2", type: encType }, body)];
+      if (type === 3 && auth.creds.account) {
+        content.push(
+          node(
+            "device-identity",
+            {},
+            encodeSignedDeviceIdentity(auth.creds.account as ADVSignedDeviceIdentity, true),
+          ),
+        );
+      }
+
+      const id = genId();
+      sendNode(node("message", { id, to: jid, type: "text" }, content));
+      return { id };
+    });
+  }
+
+  async function uploadPreKeys(range = PREKEY_UPLOAD_COUNT): Promise<void> {
+    return serial(async () => {
+      const { node: iq, update, count } = await buildPreKeyUploadNode(auth, range, c);
+      Object.assign(auth.creds, update);
+      iq.attrs.id = genId();
+      sendNode(iq);
+      await opts.saveCreds?.();
+      // eslint-disable-next-line no-console
+      console.log(`messages: ${count} pré-chaves enviadas (próxima id ${auth.creds.nextPreKeyId})`);
+    });
+  }
+
+  async function onEncryptNotification(): Promise<void> {
+    await uploadPreKeys();
+  }
+
+  // pkmsg(3) e msg(1) antes de skmsg(9): o pairwise traz o SKDM que o skmsg usa.
+  function rank(type?: string): number {
+    return type === "skmsg" ? 9 : type === "pkmsg" ? 0 : 1;
+  }
+
+  async function loadSenderKey(name: string): Promise<SenderKeyRecord> {
+    const { [name]: raw } = await auth.keys.get("sender-key", [name]);
+    return raw ? SenderKeyRecord.deserialize(raw) : new SenderKeyRecord();
+  }
+
+  async function storeSenderKey(name: string, rec: SenderKeyRecord): Promise<void> {
+    await auth.keys.set({ "sender-key": { [name]: rec.serialize() } });
+  }
+
+  void meUser;
+
+  return { handleMessageStanza, sendText, sendMessage, uploadPreKeys, onEncryptNotification };
+}

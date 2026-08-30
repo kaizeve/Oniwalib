@@ -1,6 +1,11 @@
 node_modules/
 dist/
+oni-auth/
+*.owl
+*.owl.key
 *.log
+logs/
+.pm2/
 .DS_Store
 .env
 bun.lock

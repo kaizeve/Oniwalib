@@ -101,6 +101,20 @@ roundtrip(
   ),
 );
 
+// Caminhos que o encoder portado da Baileys ativa: packing NIBBLE/HEX e JID.
+roundtrip("atributo só-dígitos (NIBBLE_8 packed)", node("iq", { t: "1737054321" }));
+roundtrip("atributo com ponto e hífen (NIBBLE_8)", node("iq", { v: "2.3000-1" }));
+roundtrip("atributo HEX_8", node("enc", { hash: "ABCDEF0123456789" }));
+roundtrip("atributo JID_PAIR", node("to", { jid: "5511999999999@s.whatsapp.net" }));
+roundtrip(
+  "atributo AD_JID (com device)",
+  node("to", { jid: "5511999999999:7@s.whatsapp.net" }),
+);
+roundtrip(
+  "conteúdo string via token de dicionário duplo",
+  node("x", {}, "voip_settings"),
+);
+
 // --- 2. tokens -----------------------------------------------------------
 
 {

@@ -5,7 +5,9 @@
 // o callout de risco de ban no plano: código fixo repetido é impressão digital.
 
 export interface ClientProfile {
-  /** [nome, plataforma, versão] — ex.: ["Oniwalib", "Chrome", "1.0.0"] */
+  /** `[os, cliente, versão]` — vira `DeviceProps.os` e decide o platformType.
+   *  O WhatsApp valida o `os`: use um real ("Ubuntu", "Windows", "Mac OS"),
+   *  não um nome inventado, ou o servidor recusa o registro. */
   browser: [string, string, string];
   /** Versão do WhatsApp Web que a lib se anuncia falando. VERIFICAR contra a fixada. */
   waVersion: [number, number, number];
@@ -18,14 +20,14 @@ export interface ClientProfile {
 }
 
 export const STOCK: ClientProfile = {
-  browser: ["Oniwalib", "Chrome", "1.0.0"],
+  browser: ["Ubuntu", "Chrome", "22.04.4"],
   waVersion: [2, 3000, 0],
   interactiveMessages: false,
   autoViewOnceWrap: false,
 };
 
 export const MODIFIED: ClientProfile = {
-  browser: ["Oniwalib", "Chrome", "1.0.0"],
+  browser: ["Ubuntu", "Chrome", "22.04.4"],
   waVersion: [2, 3000, 0],
   pairingCode: "RTSSTOP1",
   interactiveMessages: true,

@@ -4,7 +4,7 @@
 // cannot settle") num `await sock.connect()` que esteja um nível abaixo, dentro
 // de uma async function chamada. Inline funciona.
 
-import { OniBot } from "../src/bot/bot";
+import { OniBot, asciiTable } from "../src/bot/bot";
 import { Monitor, humanBytes, humanDuration } from "../src/bot/monitor";
 import { crypto } from "../src/crypto";
 import { NoiseSocket } from "../src/noise/socket";
@@ -29,6 +29,7 @@ const ok = (n: string, c: boolean, d = "") => {
   }
 };
 const mk = (text: string) => ({ from: "u", id: "1", text });
+const mkt = (text: string, timestamp: number) => ({ from: "u", id: "1", text, timestamp });
 const bodyText = (n: BinaryNode): string => {
   const c = getBinaryNodeChild(n, "body")?.content;
   return typeof c === "string" ? c : c instanceof Uint8Array ? utf8Decode(c) : "";
@@ -36,7 +37,13 @@ const bodyText = (n: BinaryNode): string => {
 
 // --- dispatch (puro) -------------------------------------------------
 const bot = new OniBot({ name: "t" });
-ok("!ping → pong", (await bot.handle(mk("!ping"))) === "pong");
+ok("!ping sem carimbo → pong", (await bot.handle(mk("!ping"))) === "pong");
+{
+  const r = (await bot.handle(mkt("!ping", Math.floor(Date.now() / 1000) - 2))) as string;
+  ok("!ping com carimbo → latência", r.startsWith("pong · ~") && r.endsWith("ms"), r);
+  const lag = Number(r.replace(/\D+/g, ""));
+  ok("!ping latência ~2000ms", lag >= 1500 && lag <= 4000, r);
+}
 ok("!echo foo bar → foo bar", (await bot.handle(mk("!echo foo bar"))) === "foo bar");
 ok("!echo vazio", (await bot.handle(mk("!echo"))) === "(nada pra repetir)");
 ok("texto normal → undefined", (await bot.handle(mk("oi tudo bem"))) === undefined);
@@ -54,6 +61,34 @@ ok("commandNames inclui custom", bot.commandNames.includes("double"));
 const pbot = new OniBot({ prefix: "/" });
 ok("prefixo custom", (await pbot.handle(mk("/ping"))) === "pong");
 ok("prefixo errado ignora", (await pbot.handle(mk("!ping"))) === undefined);
+
+// --- respostas ricas: botões, lista, tabela ----------------------
+{
+  const r = (await bot.handle(mk("!buttons"))) as any;
+  ok("!buttons → buttonsMessage", !!r?.buttonsMessage);
+  ok("!buttons: 3 botões", r.buttonsMessage.buttons.length === 3);
+  ok("!buttons: id = comando", r.buttonsMessage.buttons[0].buttonId === "!ping");
+  ok("!buttons: displayText", r.buttonsMessage.buttons[0].buttonText.displayText.includes("ping"));
+}
+{
+  const r = (await bot.handle(mk("!list"))) as any;
+  const m = (await bot.handle(mk("!menu"))) as any;
+  ok("!list → listMessage", !!r?.listMessage);
+  ok("!menu é alias", JSON.stringify(m) === JSON.stringify(r));
+  ok("!list: 2 seções", r.listMessage.sections.length === 2);
+  ok("!list: rowId = comando", r.listMessage.sections[0].rows[0].rowId === "!ping");
+}
+{
+  const r = (await bot.handle(mk("!table"))) as string;
+  ok("!table → string monoespaçada", typeof r === "string" && r.startsWith("```\n┌"));
+  ok("!table tem as linhas", r.includes("uptime") && r.includes("ram (RSS)"));
+}
+{
+  const t = asciiTable(["a", "bb"], [["1", "2"], ["333", "4"]]);
+  const rows = t.split("\n");
+  ok("asciiTable: topo+cab+régua+2 linhas+base = 6", rows.length === 6);
+  ok("asciiTable: larguras alinhadas", rows.every((l) => l.length === rows[0].length), t);
+}
 
 // --- monitor -------------------------------------------------------
 const mon = new Monitor();
@@ -92,7 +127,8 @@ sock.events.on("node.recv", (n: BinaryNode) => {
     .handle({ from: n.attrs.from ?? "x", id: n.attrs.id ?? "x", text: bodyText(n) })
     .then((reply) => {
       if (reply !== undefined) {
-        sock.sendNode(node("message", { to: n.attrs.from ?? "x", id: "r" }, [node("body", {}, reply)]));
+        const body = typeof reply === "string" ? reply : JSON.stringify(reply);
+        sock.sendNode(node("message", { to: n.attrs.from ?? "x", id: "r" }, [node("body", {}, body)]));
       }
     });
 });

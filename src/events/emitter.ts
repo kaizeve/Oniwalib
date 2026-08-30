@@ -13,11 +13,19 @@ export interface OniwalibEvents {
     lastDisconnect?: { error: Error; date: Date };
     qr?: string;
     pairingCode?: string;
+    /** `true` no `connection.update` logo após um pareamento por QR concluído. */
+    isNewLogin?: boolean;
   };
   "creds.update": Record<string, unknown>;
   "messages.upsert": {
     type: "notify" | "append";
-    messages: Array<{ key: MessageKey; message?: unknown; pushName?: string }>;
+    messages: Array<{
+      key: MessageKey;
+      message?: unknown;
+      /** Carimbo do servidor (`t`), em segundos unix, quando a stanza traz. */
+      messageTimestamp?: number;
+      pushName?: string;
+    }>;
   };
   "messages.receipt": { key: MessageKey; receipt: "delivery" | "read" | "played" };
   "node.recv": BinaryNode;
