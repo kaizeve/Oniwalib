@@ -1,21 +1,22 @@
-oniwalib — Licença de uso restrito
-==================================
+oniwalib — Restricted-Use License
+=================================
 
 Copyright (c) 2026 loveless
 
-Este software e o código-fonte que o acompanha são de USO EXCLUSIVO do autor
-("loveless") e dos criadores do projeto RTS (https://github.com/UrubuCode/rts).
+This software and its accompanying source code are for the EXCLUSIVE USE of the
+author ("loveless") and the creators of the RTS project
+(https://github.com/UrubuCode/rts).
 
-É permitido, apenas às pessoas acima:
-  - usar, executar e modificar o software;
-  - criar trabalhos derivados para uso próprio dentro desse círculo.
+Permitted, to the above parties only:
+  - use, run, and modify the software;
+  - create derivative works for their own use within that circle.
 
-É vedado a qualquer outra pessoa ou organização, sem autorização escrita do
-autor:
-  - usar, copiar, executar ou modificar o software;
-  - redistribuir, publicar, sublicenciar ou vender o software ou partes dele;
-  - remover ou alterar este aviso.
+Prohibited to any other person or organization without the author's written
+permission:
+  - use, copy, run, or modify the software;
+  - redistribute, publish, sublicense, or sell the software or any part of it;
+  - remove or alter this notice.
 
-O software é fornecido "como está", sem garantia de qualquer tipo. O autor não
-se responsabiliza por qualquer dano decorrente do uso — incluindo, sem
-limitação, suspensão ou banimento de contas em serviços de terceiros.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. The author is
+not liable for any damage arising from its use — including, without limitation,
+the suspension or ban of accounts on third-party services.

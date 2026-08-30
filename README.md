@@ -1,169 +1,180 @@
 <div align="center">
 
-# oniwalib
+<img src="assets/oni-banner.svg" alt="oniwalib — Oni, the friendly demon mascot, holding a plug" width="100%">
 
-**Cliente WhatsApp Multi-Device nativo, sobre o [RTS](https://github.com/UrubuCode/rts).**
-Fala o socket direto — sem navegador, sem Puppeteer, sem headless Chrome.
+<br>
 
-`nome provisório` · `TypeScript` · `compila para um binário único via RTS`
+**A native WhatsApp Multi-Device client, built on [RTS](https://github.com/UrubuCode/rts).**
+It talks the socket directly — no browser, no Puppeteer, no headless Chrome.
+
+<br>
+
+[![tests](https://img.shields.io/badge/tests-87%2F87%20passing-2ea44f?style=flat-square)](#tests)
+[![runtimes](https://img.shields.io/badge/runs%20on-bun%20%C2%B7%20node%20%C2%B7%20RTS-0b7285?style=flat-square)](#status)
+[![language](https://img.shields.io/badge/TypeScript-3178c6?style=flat-square&logo=typescript&logoColor=white)](#)
+[![status](https://img.shields.io/badge/status-early%20%C2%B7%20foundation-d9822b?style=flat-square)](#status)
+[![license](https://img.shields.io/badge/license-restricted-c92a2a?style=flat-square)](LICENSE)
+
+<sub>working name · progress tracked separately from the RTS core · meet **Oni**, the mascot 👹 (a demon — but a friendly one)</sub>
 
 </div>
 
 ---
 
-## O que é
+## What it is
 
-`oniwalib` é uma biblioteca para conversar com o WhatsApp pelo protocolo
-**Multi-Device**, no mesmo estilo da [Baileys](https://github.com/WhiskeySockets/Baileys):
-um cliente WebSocket que implementa o handshake, a criptografia e o formato
-binário do WhatsApp por conta própria.
+`oniwalib` speaks to WhatsApp over the **Multi-Device** protocol, in the same
+spirit as [Baileys](https://github.com/WhiskeySockets/Baileys): a WebSocket
+client that implements WhatsApp's handshake, cryptography and binary format on
+its own.
 
-A diferença é o alvo de execução. Em vez de rodar sobre Node com dezenas de
-dependências, `oniwalib` é escrita para **compilar com o RTS** — o motor que
-transforma TypeScript em código de máquina nativo. O resultado pretendido é um
-**executável único**, sem runtime para instalar, com pegada de memória de
-navegador-reverso (dezenas de MB, não centenas).
+What's different is the execution target. Instead of running on Node with dozens
+of dependencies, `oniwalib` is written to **compile with RTS** — the engine that
+turns TypeScript into native machine code. The intended result is a **single
+executable**, no runtime to install, with a reverse-browser memory footprint
+(tens of MB, not hundreds).
 
-### Para que serve
+### What it's for
 
-- Automação da **própria conta** de WhatsApp: bots de atendimento, notificações,
-  integrações internas.
-- Base para um serviço **multi-linguagem**: o binário sobe como daemon com uma
-  API local, e qualquer linguagem (Java, Go, PHP, Python…) fala com ele.
-- Banco de provas do RTS: código no formato Baileys — cripto, `Buffer`, socket
-  assíncrono longo, protobuf — é exatamente o que estressa o motor.
+- Automating **your own** WhatsApp account: support bots, notifications, internal
+  integrations.
+- A base for a **multi-language** service: the binary runs as a daemon with a
+  local API, and any language (Java, Go, PHP, Python…) talks to it.
+- A proving ground for RTS: Baileys-shaped code — crypto, `Buffer`, long-lived
+  async sockets, protobuf — is exactly what stresses the engine.
 
-### O que NÃO é
+### What it is not
 
-Não é um cliente oficial e não finge ser um. Cliente não-oficial de WhatsApp
-**é banível** — o gatilho principal é volume e mensagem não solicitada, e isso
-fere os Termos de Serviço. Este repositório não tem, e não vai ter, recursos de
-evasão de detecção.
+Not an official client, and it doesn't pretend to be one. An unofficial WhatsApp
+client **can be banned** — the main trigger is volume and unsolicited messaging,
+which violates the Terms of Service. This repository has no detection-evasion
+features, and won't.
 
 ---
 
-## Como funciona
+## How it works
 
-O WhatsApp Web Multi-Device é, em camadas:
+WhatsApp Web Multi-Device, in layers:
 
 ```
   ┌──────────────────────────────────────────────────────┐
-  │  aplicação / bot / daemon                             │
+  │  application / bot / daemon                           │
   ├──────────────────────────────────────────────────────┤
-  │  eventos      store        profiles (original/mod)    │
+  │  events      store        profiles (stock / modified) │
   ├──────────────────────────────────────────────────────┤
-  │  auth  ── registro (pairing code / QR), pre-keys      │
+  │  auth  ── registration (pairing code / QR), pre-keys  │
   ├──────────────────────────────────────────────────────┤
   │  signal      proto (WA)      frame (WABinary)         │
   ├──────────────────────────────────────────────────────┤
-  │  noise  ── handshake XX · Curve25519 · AES-GCM · HKDF │
+  │  noise  ── XX handshake · Curve25519 · AES-GCM · HKDF │
   ├──────────────────────────────────────────────────────┤
-  │  transport  ── TLS · WebSocket cliente                │
+  │  transport  ── TLS · WebSocket client                 │
   └──────────────────────────────────────────────────────┘
 ```
 
-1. **transport** abre um WebSocket sobre TLS para o edge do WhatsApp.
-2. **noise** faz o handshake `Noise_XX_25519_AESGCM_SHA256`: troca de chaves
-   efêmeras e estáticas, cada passo derivando chave nova via HKDF. No fim, um
-   par de chaves de transporte cifra tudo daí pra frente.
-3. **frame** empacota/desempacota o **WABinary** — o formato binário tipo-XML do
-   WhatsApp, com um dicionário de tokens que comprime as tags e atributos mais
-   comuns para 1 byte.
-4. **auth** registra o dispositivo (pairing code ou QR), envia as pre-keys, e
-   guarda as credenciais para reconectar sem re-parear.
-5. **signal** cifra o conteúdo das mensagens fim-a-fim (Double Ratchet, sender
-   keys para grupos).
-6. **proto** é o schema protobuf que dá forma ao conteúdo dentro do envelope
-   cifrado.
-7. **eventos** entregam para a aplicação: `connection.update`,
-   `messages.upsert`, `creds.update`…
+1. **transport** opens a WebSocket over TLS to WhatsApp's edge.
+2. **noise** runs the `Noise_XX_25519_AESGCM_SHA256` handshake: ephemeral and
+   static key exchanges, each step deriving a fresh key via HKDF. At the end, a
+   pair of transport keys encrypts everything from there on.
+3. **frame** packs and unpacks **WABinary** — WhatsApp's XML-ish binary format,
+   with a token dictionary that compresses the common tags and attributes down
+   to one byte.
+4. **auth** registers the device (pairing code or QR), uploads the pre-keys, and
+   stores the credentials so it can reconnect without pairing again.
+5. **signal** end-to-end-encrypts the message content (Double Ratchet, sender
+   keys for groups).
+6. **proto** is the protobuf schema that shapes the content inside the encrypted
+   envelope.
+7. **events** hand it to the application: `connection.update`, `messages.upsert`,
+   `creds.update`…
 
-Toda a criptografia passa por **uma interface** (`src/crypto/types.ts`). O
-núcleo da lib nunca chama `node:crypto` nem nada de plataforma diretamente —
-isso é responsabilidade de um *adapter*. Trocar o adapter troca o backend
-inteiro sem tocar em mais nada. É o que mantém `oniwalib` portável e o que
-isola o único ponto que ainda depende do motor.
+All cryptography goes through **one interface** (`src/crypto/types.ts`). The
+library core never calls `node:crypto` or anything platform-specific directly —
+that's an *adapter's* job. Swapping the adapter swaps the whole backend without
+touching anything else. That's what keeps `oniwalib` portable and what isolates
+the single point that still depends on the engine.
 
 ---
 
-## Estado
+## Status
 
-`oniwalib` roda em **bun/node hoje**, e no **RTS** em tudo que não depende de
-primitivos de criptografia que o motor ainda não expõe.
+`oniwalib` runs on **bun / node today**, and on **RTS** for everything that
+doesn't need a cryptographic primitive the engine doesn't expose yet.
 
-| Módulo | O que faz | bun/node | RTS |
+| Module | What it does | bun / node | RTS |
 |---|---|:---:|:---:|
-| `frame/` | codec WABinary: binary node, buffers, JID, tabelas de token | ✅ | ✅ |
-| `noise/` | handshake XX + enquadramento | ✅ | ✅ |
-| `crypto/` | interface + adapter `node:crypto` (bun/node) e adapter RTS | ✅ | ✅ |
-| `proto/` | codec protobuf próprio (sem protobufjs) + builders de mensagem (botões/list/interactive) + `HandshakeMessage` e `ClientPayload` de fio | ✅ | ✅ |
-| `auth/` | credenciais + cofre de chaves Signal | ✅ | ✅¹ |
-| `events/` | superfície de eventos tipada | ✅ | ✅ |
-| `profiles/` | camada original vs modificada | ✅ | ✅ |
-| `transport/` | interface `Transport` + `MockTransport` + `NoiseSocket` (handshake→cripto→WABinary sobre um transporte) | ✅ | ✅ |
-| `transport/` — conector real | TLS + WebSocket cliente com headers/Origin custom | ⛔ | ⛔ |
+| `frame/` | WABinary codec: binary node, buffers, JID, token tables | ✅ | ✅ |
+| `noise/` | XX handshake + framing + `NoiseSocket` | ✅ | ✅ |
+| `crypto/` | `Crypto` interface + `node:crypto` adapter (bun/node) + RTS adapter | ✅ | ✅ |
+| `proto/` | own protobuf codec (no protobufjs) + message builders (buttons / list / interactive) + `HandshakeMessage` / `ClientPayload` wire | ✅ | ✅ |
+| `auth/` | credentials + Signal key store | ✅ | ✅¹ |
+| `transport/` | `Transport` interface + `MockTransport` | ✅ | ✅ |
+| `events/` · `profiles/` | typed event surface · stock vs modified | ✅ | ✅ |
+| `transport/` — real connector | TLS + WebSocket client with custom headers / Origin | ⛔ | ⛔ |
 
-<sub>¹ A assinatura de identidade (XEdDSA) ainda não existe no RTS — no motor,
-a `signedPreKey` fica com assinatura placeholder até a Fase 2. Todo o resto
-roda nativo.</sub>
+<sub>¹ Identity signing (XEdDSA) isn't in RTS yet — on the engine, the
+`signedPreKey` carries a placeholder signature until Phase 2. Everything else
+runs native.</sub>
 
-**Testes:** `wire` 24 (codec protobuf + `HandshakeMessage`/`ClientPayload`) ·
-`wabinary` 23 · `noise` 12 · `auth` 22 · `socket` 6 (integração: transporte →
-enquadramento → handshake XX → cripto de transporte → WABinary, ponta a ponta)
-→ **87/87 em bun E no RTS** (`rts run`). Falta só a tomada real (TLS + WebSocket)
-para conectar no servidor do WhatsApp.
+### Phase 0 — engine primitives
 
-### A Fase 0 — estado no motor do RTS
-
-| Primitivo | API | Estado no RTS |
+| Primitive | API | State in RTS |
 |---|---|---|
-| SHA-256, HMAC-SHA256, HKDF, `randomBytes` | `node:crypto` | ✅ já existia |
-| AES-128/256-GCM e -CBC | `createCipheriv` / `createDecipheriv` (com `setAAD`/`getAuthTag`/`setAuthTag`) | ✅ adicionado |
-| ECDH X25519 | `generateX25519KeyPair` / `x25519PublicKey` / `x25519DiffieHellman` (bytes crus, sem KeyObject) | ✅ adicionado |
-| Assinatura Curve25519 (XEdDSA) | — | ⛔ pendente (Fase 2) |
+| SHA-256, HMAC-SHA256, HKDF, `randomBytes` | `node:crypto` | ✅ already present |
+| AES-128/256-GCM and -CBC | `createCipheriv` / `createDecipheriv` (with `setAAD` / `getAuthTag` / `setAuthTag`) | ✅ added |
+| X25519 ECDH | `generateX25519KeyPair` / `x25519PublicKey` / `x25519DiffieHellman` (raw bytes, no KeyObject) | ✅ added |
+| Curve25519 signing (XEdDSA) | — | ⛔ pending (Phase 2) |
 
-Com isso, o handshake Noise e a inicialização de credenciais rodam no motor.
-Falta a camada de transporte (TLS + WebSocket cliente) para conectar de fato.
+With this, the Noise handshake and credential initialization run on the engine.
+What's left to actually connect is the transport layer (TLS + WebSocket client).
+
+### <a name="tests"></a>Tests
+
+`wire` 24 (protobuf codec + `HandshakeMessage` / `ClientPayload`) · `wabinary`
+23 · `noise` 12 · `auth` 22 · `socket` 6 (integration: transport → framing → XX
+handshake → transport crypto → WABinary, end to end) → **87 / 87 on bun AND on
+RTS**.
 
 ---
 
-## Uso
+## Usage
 
-> A conexão real depende da Fase 0. O que já dá para fazer hoje é montar e
-> inspecionar as mensagens e rodar o handshake com um adapter de referência.
+> A live connection needs the real transport. What already works today is
+> building and inspecting messages, and running the handshake against a
+> reference adapter.
 
-### Montar uma mensagem com botões
+### Build a message with buttons
 
 ```ts
 import { message as m } from "oniwalib";
 
 const msg = m.buttons({
-  content: "Escolha uma opção:",
+  content: "Pick an option:",
   footer: "oniwalib",
   buttons: [
-    { id: "menu",   text: "Ver menu" },
-    { id: "falar",  text: "Falar com humano" },
+    { id: "menu",  text: "See menu" },
+    { id: "human", text: "Talk to a human" },
   ],
 });
 ```
 
-### Native flow (o caminho atual dos forks modificados)
+### Native flow (the path modified forks use today)
 
 ```ts
 import { message as m } from "oniwalib";
 
 const msg = m.interactive({
-  body: "Seu pedido está pronto.",
-  footer: "Loja X",
+  body: "Your order is ready.",
+  footer: "Shop X",
   buttons: [
-    m.flow.url("Acompanhar", "https://loja.x/pedido/123"),
-    m.flow.copy("Copiar código", "ABC123"),
-    m.flow.quickReply("Avaliar", "rate:123"),
+    m.flow.url("Track it", "https://shop.x/order/123"),
+    m.flow.copy("Copy code", "ABC123"),
+    m.flow.quickReply("Rate us", "rate:123"),
   ],
 });
 ```
 
-### Codificar/decodificar um binary node
+### Encode / decode a binary node
 
 ```ts
 import { frame } from "oniwalib";
@@ -174,103 +185,105 @@ const bytes = frame.encodeBinaryNode(
 const back = frame.decodeBinaryNode(bytes); // → { tag: "iq", attrs: {...} }
 ```
 
-### Rodar o handshake Noise (com adapter de referência)
+### Run a NoiseSocket over a mock transport
 
 ```ts
-import { NoiseHandshake, crypto } from "oniwalib";
+import { NoiseSocket, mockTransportPair, crypto, encodeClientPayload,
+         buildClientPayload, initAuthCreds, STOCK } from "oniwalib";
 
-const hs = new NoiseHandshake(crypto());
-const eph = crypto().generateX25519();
-const hello = hs.clientHello(eph);
-// … troca com o servidor …
-const { encKey, decKey } = hs.finish();
+const [clientT] = mockTransportPair();
+const sock = new NoiseSocket({
+  transport: clientT,
+  crypto: crypto(),
+  staticKey: crypto().generateX25519(),
+  clientPayload: encodeClientPayload(buildClientPayload(initAuthCreds(), STOCK)),
+});
+sock.events.on("node.recv", (node) => console.log("<-", node.tag));
+await sock.connect();
 ```
 
 ---
 
-## Estrutura
+## Project layout
 
 ```
 oniwalib/
+├── assets/
+│   └── oni-banner.svg        the mascot
 ├── src/
-│   ├── frame/              codec WABinary
-│   │   ├── constants.ts      tags + tabelas de token (PROVENÂNCIA: conferir)
-│   │   ├── buffer.ts         BufferReader/Writer + UTF-8 próprio
-│   │   ├── jid.ts            parse/format de JID
-│   │   ├── node.ts           o tipo BinaryNode + acessores
-│   │   ├── decode.ts         bytes → BinaryNode
-│   │   ├── encode.ts         BinaryNode → bytes
-│   │   └── index.ts
+│   ├── frame/                WABinary codec
+│   │   ├── constants.ts        tags + token tables (PROVENANCE: to verify)
+│   │   ├── buffer.ts           BufferReader/Writer + own UTF-8
+│   │   ├── jid.ts              JID parse / format
+│   │   ├── node.ts             the BinaryNode type + accessors
+│   │   ├── decode.ts           bytes → BinaryNode
+│   │   └── encode.ts           BinaryNode → bytes
 │   ├── noise/
-│   │   ├── frame.ts          enquadramento [len de 3 bytes][payload] + intro
-│   │   ├── handshake.ts      Noise_XX_25519_AESGCM_SHA256, lado cliente
-│   │   ├── wire.ts           serialização dos 3 frames do handshake (placeholder → protobuf)
-│   │   └── socket.ts         NoiseSocket: transporte + handshake + WABinary numa conexão
-│   ├── transport/
-│   │   ├── types.ts          interface Transport + endpoints do WhatsApp
-│   │   └── mock.ts           par de transportes em memória (testes)
+│   │   ├── frame.ts           framing [3-byte len][payload] + intro header
+│   │   ├── handshake.ts       Noise_XX_25519_AESGCM_SHA256, client side
+│   │   ├── wire.ts            HandshakeMessage protobuf
+│   │   └── socket.ts          NoiseSocket: transport + handshake + WABinary
 │   ├── crypto/
-│   │   ├── types.ts          a interface Crypto (a fronteira de plataforma)
-│   │   ├── node-adapter.ts   implementação sobre node:crypto (referência)
-│   │   └── index.ts          crypto() / setCrypto()
+│   │   ├── types.ts           the Crypto interface (the platform boundary)
+│   │   ├── node-adapter.ts    over node:crypto (bun / node)
+│   │   ├── rts-adapter.ts     over RTS's crypto primitives
+│   │   └── index.ts           crypto() / setCrypto() with runtime detection
 │   ├── proto/
-│   │   ├── wire.ts           codec protobuf mínimo (varint, length-delimited, fixed32/64)
-│   │   ├── message.ts        builders de body: text, buttons, list, template, interactive
-│   │   ├── handshake.ts      tipos ClientPayload + buildClientPayload
-│   │   └── client-payload.ts ClientPayload → bytes protobuf
+│   │   ├── wire.ts            minimal protobuf codec (varint, len-delimited, i32/i64)
+│   │   ├── message.ts         body builders: text, buttons, list, template, interactive
+│   │   ├── handshake.ts       ClientPayload types + buildClientPayload
+│   │   └── client-payload.ts  ClientPayload → protobuf bytes
 │   ├── auth/
-│   │   └── state.ts          initAuthCreds, memoryAuthState, base64 próprio
+│   │   └── state.ts           initAuthCreds, memoryAuthState, own base64
+│   ├── transport/
+│   │   ├── types.ts           Transport interface + WhatsApp endpoints
+│   │   └── mock.ts            in-memory transport pair (tests)
 │   ├── events/
-│   │   └── emitter.ts        Emitter tipado + OniwalibEvents
+│   │   └── emitter.ts         typed Emitter + OniwalibEvents
 │   ├── profiles/
-│   │   └── index.ts          STOCK vs MODIFIED
+│   │   └── index.ts           STOCK vs MODIFIED
 │   └── index.ts
-├── test/
-│   ├── wabinary.test.ts      round-trip do codec + builders
-│   ├── noise.test.ts         handshake XX ponta a ponta + enquadramento
-│   └── auth.test.ts          init de credenciais + base64
-├── package.json
-├── tsconfig.json
-└── README.md
+├── test/                      wire · wabinary · noise · auth · socket
+├── PUBLISH.md                 how to push and keep this repo updated
+├── package.json · tsconfig.json · LICENSE · README.md
 ```
 
 ---
 
-## Desenvolvimento
+## Development
 
 ```bash
-# testes no runtime de referência
-bun test/wabinary.test.ts
-bun test/noise.test.ts
-bun test/auth.test.ts
+# reference runtime
+bun test/wire.test.ts
 
-# os mesmos testes no motor alvo
-../rts/target/fast/rts run test/wabinary.test.ts
+# the same tests on the target engine
+../rts/target/fast/rts run test/wire.test.ts
 ```
 
-Rodar em ambos e comparar é o teste de "código estilo Baileys funciona no RTS".
+Running both and comparing is the "Baileys-shaped code works on RTS" test.
 
-### Original e modificada
+### Stock and modified
 
-Um núcleo só. `src/profiles/index.ts` aplica um conjunto de parâmetros por cima:
-a identidade do cliente (o *browser triple*, versão), a string do pairing code,
-e se os tipos interativos ficam ativos.
+One core. `src/profiles/index.ts` applies a set of parameters on top: the client
+identity (browser triple, version), the pairing-code string, and whether the
+interactive message types are on.
 
-- **`STOCK`** — identidade de cliente padrão, sem shaping. Menor superfície de detecção.
-- **`MODIFIED`** — identidade custom, pairing code fixo padronizável, tipos
-  interativos ligados. Quem usa escolhe, **com a própria conta no risco**.
+- **`STOCK`** — default client identity, no shaping. Smaller detection surface.
+- **`MODIFIED`** — custom identity, a standardizable fixed pairing code,
+  interactive types on. The user chooses, **with their own account at risk**.
 
 ---
 
-## Licença
+## License
 
-**Uso exclusivo do criador e dos criadores do RTS.** Não é software livre. Não
-redistribuir, publicar ou usar fora desse círculo sem autorização.
+**Exclusive use of the author and the RTS creators.** Not open source. Do not
+redistribute, publish, or use outside that circle without permission. See
+[`LICENSE`](LICENSE).
 
-Autoria: **loveless**.
+Author: **loveless**.
 
 ---
 
 <div align="center">
-<sub>oniwalib · rascunho · progresso separado do core do RTS</sub>
+<sub>oniwalib · draft · progress tracked separately from the RTS core</sub>
 </div>

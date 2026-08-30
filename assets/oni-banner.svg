@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 420" width="1280" height="420" role="img" aria-label="oniwalib — Oni, a friendly demon mascot holding a plug">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b453c"/>
+      <stop offset="1" stop-color="#17614f"/>
+    </linearGradient>
+    <radialGradient id="skin" cx="0.4" cy="0.35" r="0.8">
+      <stop offset="0" stop-color="#f5988a"/>
+      <stop offset="0.55" stop-color="#e9635b"/>
+      <stop offset="1" stop-color="#d24f49"/>
+    </radialGradient>
+    <linearGradient id="horn" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f6ecd6"/>
+      <stop offset="1" stop-color="#dcc7a4"/>
+    </linearGradient>
+    <clipPath id="head">
+      <ellipse cx="250" cy="212" rx="150" ry="146"/>
+    </clipPath>
+  </defs>
+
+  <rect x="0" y="0" width="1280" height="420" rx="28" fill="url(#bg)"/>
+
+  <!-- signal arcs behind the wordmark -->
+  <g fill="none" stroke="#8fe0cc" stroke-width="3" opacity="0.16">
+    <circle cx="1010" cy="210" r="150"/>
+    <circle cx="1010" cy="210" r="215"/>
+    <circle cx="1010" cy="210" r="285"/>
+  </g>
+
+  <!-- festive confetti -->
+  <g opacity="0.9">
+    <rect x="150" y="52" width="14" height="14" rx="3" fill="#f5c86b" transform="rotate(20 157 59)"/>
+    <circle cx="470" cy="70" r="7" fill="#7fd9c0"/>
+    <path d="M812 60 l0 18 M803 69 l18 0" stroke="#f59c8c" stroke-width="4" stroke-linecap="round"/>
+    <rect x="1150" y="96" width="12" height="12" rx="3" fill="#a9c7ff" transform="rotate(-15 1156 102)"/>
+    <circle cx="96" cy="300" r="6" fill="#f5c86b"/>
+    <path d="M556 360 l0 16 M548 368 l16 0" stroke="#7fd9c0" stroke-width="4" stroke-linecap="round"/>
+    <rect x="905" y="352" width="13" height="13" rx="3" fill="#f59c8c" transform="rotate(30 911 358)"/>
+    <circle cx="1196" cy="330" r="7" fill="#7fd9c0"/>
+    <path d="M700 40 l0 14 M693 47 l14 0" stroke="#f5c86b" stroke-width="3.5" stroke-linecap="round"/>
+  </g>
+
+  <!-- ONI -->
+  <g transform="translate(28,6)">
+    <!-- hair back tufts (small, tucked to the head) -->
+    <path d="M150 132 q-16 -26 4 -46 q4 22 22 30 q-20 4 -26 16z" fill="#201c2b"/>
+    <path d="M350 132 q16 -26 -4 -46 q-4 22 -22 30 q20 4 26 16z" fill="#201c2b"/>
+
+    <!-- horns -->
+    <path d="M168 92 q-18 -58 20 -84 q16 40 30 78 q-26 -8 -50 6z" fill="url(#horn)" stroke="#c9b48c" stroke-width="2"/>
+    <path d="M332 92 q18 -58 -20 -84 q-16 40 -30 78 q26 -8 50 6z" fill="url(#horn)" stroke="#c9b48c" stroke-width="2"/>
+
+    <!-- head -->
+    <ellipse cx="250" cy="212" rx="150" ry="146" fill="url(#skin)"/>
+    <g clip-path="url(#head)">
+      <ellipse cx="330" cy="300" rx="120" ry="120" fill="#d24f49" opacity="0.35"/>
+    </g>
+
+    <!-- ears -->
+    <ellipse cx="104" cy="214" rx="20" ry="30" fill="url(#skin)"/>
+    <ellipse cx="396" cy="214" rx="20" ry="30" fill="url(#skin)"/>
+
+    <!-- hair top tuft -->
+    <path d="M196 78 q54 -30 108 0 q-16 -8 -32 -6 q10 -10 -4 -16 q-6 12 -22 12 q-8 -12 -18 -4 q4 10 -6 14 q-16 -4 -26 0z" fill="#201c2b"/>
+
+    <!-- blush -->
+    <ellipse cx="168" cy="252" rx="26" ry="16" fill="#f4a7a0" opacity="0.55"/>
+    <ellipse cx="332" cy="252" rx="26" ry="16" fill="#f4a7a0" opacity="0.55"/>
+
+    <!-- brows: relaxed, friendly -->
+    <path d="M180 176 q26 -16 54 -6" fill="none" stroke="#7a2f2a" stroke-width="7" stroke-linecap="round"/>
+    <path d="M320 176 q-26 -16 -54 -6" fill="none" stroke="#7a2f2a" stroke-width="7" stroke-linecap="round"/>
+
+    <!-- eyes -->
+    <ellipse cx="207" cy="206" rx="30" ry="34" fill="#ffffff"/>
+    <ellipse cx="293" cy="206" rx="30" ry="34" fill="#ffffff"/>
+    <circle cx="214" cy="210" r="15" fill="#262433"/>
+    <circle cx="286" cy="210" r="15" fill="#262433"/>
+    <circle cx="209" cy="204" r="5" fill="#ffffff"/>
+    <circle cx="281" cy="204" r="5" fill="#ffffff"/>
+
+    <!-- nose -->
+    <path d="M244 232 q6 10 12 0" fill="none" stroke="#c1544d" stroke-width="5" stroke-linecap="round"/>
+
+    <!-- friendly smile + one small fang -->
+    <path d="M206 266 q44 46 88 0" fill="none" stroke="#6e2723" stroke-width="9" stroke-linecap="round"/>
+    <path d="M222 276 l10 22 l12 -18 z" fill="#ffffff"/>
+
+    <!-- arm + hand holding a plug -->
+    <path d="M360 300 q46 6 66 36" fill="none" stroke="#e9635b" stroke-width="26" stroke-linecap="round"/>
+    <ellipse cx="430" cy="344" rx="26" ry="24" fill="url(#skin)"/>
+    <!-- plug -->
+    <rect x="440" y="326" width="46" height="36" rx="9" fill="#f6ecd6" stroke="#c9b48c" stroke-width="2"/>
+    <rect x="486" y="332" width="16" height="7" rx="2" fill="#b7a17a"/>
+    <rect x="486" y="349" width="16" height="7" rx="2" fill="#b7a17a"/>
+    <!-- cable -->
+    <path d="M440 344 q-26 4 -30 30 q-4 24 20 30 q22 6 22 -14" fill="none" stroke="#f59c8c" stroke-width="7" stroke-linecap="round"/>
+  </g>
+
+  <!-- WORDMARK -->
+  <g font-family="'Trebuchet MS', 'Segoe UI', Verdana, sans-serif">
+    <text x="470" y="214" font-size="104" font-weight="800" letter-spacing="-2">
+      <tspan fill="#f59c8c">oni</tspan><tspan fill="#f4efe6">walib</tspan>
+    </text>
+    <text x="476" y="258" font-size="22" font-weight="600" fill="#9fd6c8">
+      talks the WhatsApp socket directly — no browser, no Puppeteer
+    </text>
+
+    <!-- chips -->
+    <g transform="translate(474,286)" font-size="19" font-weight="700" fill="#e6f2ee">
+      <g>
+        <rect x="0" y="0" width="126" height="34" rx="17" fill="#ffffff" fill-opacity="0.10" stroke="#ffffff" stroke-opacity="0.22"/>
+        <text x="63" y="23" text-anchor="middle">TypeScript</text>
+      </g>
+      <g transform="translate(140,0)">
+        <rect x="0" y="0" width="132" height="34" rx="17" fill="#ffffff" fill-opacity="0.10" stroke="#ffffff" stroke-opacity="0.22"/>
+        <text x="66" y="23" text-anchor="middle">runs on RTS</text>
+      </g>
+      <g transform="translate(286,0)">
+        <rect x="0" y="0" width="146" height="34" rx="17" fill="#ffffff" fill-opacity="0.10" stroke="#ffffff" stroke-opacity="0.22"/>
+        <text x="73" y="23" text-anchor="middle">87 tests green</text>
+      </g>
+    </g>
+  </g>
+</svg>

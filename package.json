@@ -2,7 +2,7 @@
   "name": "oniwalib",
   "version": "0.0.0",
   "private": true,
-  "description": "Cliente WhatsApp Multi-Device sobre o RTS (nome provisorio). Estilo Baileys: socket direto, sem navegador.",
+  "description": "A native WhatsApp Multi-Device client, built on RTS (working name). Baileys-style: talks the socket directly, no browser.",
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
