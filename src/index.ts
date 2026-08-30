@@ -33,6 +33,15 @@ export {
   WA_WS_ORIGIN,
 } from "./transport/types";
 export { mockTransportPair } from "./transport/mock";
+export { MockWaServer, type MockMessage } from "./transport/mock-wa-server";
+
+export {
+  OniBot,
+  type IncomingMessage,
+  type CommandHandler,
+  type OniBotOptions,
+} from "./bot/bot";
+export { Monitor, humanBytes, humanDuration, type Stats } from "./bot/monitor";
 
 export {
   crypto,

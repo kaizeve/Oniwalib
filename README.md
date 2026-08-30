@@ -9,7 +9,7 @@ It talks the socket directly — no browser, no Puppeteer, no headless Chrome.
 
 <br>
 
-[![tests](https://img.shields.io/badge/tests-98%2F98%20passing-2ea44f?style=flat-square)](#tests)
+[![tests](https://img.shields.io/badge/tests-126%2F126%20passing-2ea44f?style=flat-square)](#tests)
 [![runtimes](https://img.shields.io/badge/runs%20on-bun%20%C2%B7%20node%20%C2%B7%20RTS-0b7285?style=flat-square)](#status)
 [![language](https://img.shields.io/badge/TypeScript-3178c6?style=flat-square&logo=typescript&logoColor=white)](#)
 [![status](https://img.shields.io/badge/status-early%20%C2%B7%20foundation-d9822b?style=flat-square)](#status)
@@ -131,8 +131,8 @@ What's left to actually connect is the transport layer (TLS + WebSocket client).
 ### <a name="tests"></a>Tests
 
 `version` 11 · `wire` 24 (protobuf codec + `HandshakeMessage` / `ClientPayload`)
-· `wabinary` 23 · `noise` 12 · `auth` 22 · `socket` 6 (integration: transport →
-framing → XX handshake → transport crypto → WABinary, end to end) → **98 / 98 on
+· `wabinary` 23 · `noise` 12 · `auth` 22 · `socket` 6 · `bot` 28 (command
+dispatch + CPU/RAM monitor + end-to-end over the mock server) → **126 / 126 on
 bun AND on RTS**.
 
 ### <a name="oni-version"></a>Keeping it working — the oni-version
@@ -197,6 +197,33 @@ const msg = m.interactive({
 });
 ```
 
+### A basic bot (`examples/bot.ts`)
+
+`oniwalib` doesn't connect to WhatsApp yet, so the bot runs over `MockWaServer`
+(the in-memory Noise server). The command dispatch and the CPU/RAM monitoring
+are real and portable — when the real transport lands, `attachBot` points at it
+and the bot works for real.
+
+```bash
+bun examples/bot.ts
+../rts/target/fast/rts run examples/bot.ts
+```
+
+```
+→ user  !ping
+← bot   pong    (round-trip ~30ms)
+
+→ user  !status
+← bot   *oni-demo* · linux · 4 vCPU
+        uptime  0s
+        cpu     16.7%   load 0.67 / 0.64 / 0.70
+        ram     61 MB RSS
+        sistema 12 GB / 16 GB
+```
+
+`OniBot` ships `!ping !status !mem !uptime !echo !help`; `bot.register(name,
+help, handler)` adds your own. `Monitor.sample()` gives the stats object.
+
 ### Encode / decode a binary node
 
 ```ts
@@ -260,7 +287,11 @@ oniwalib/
 │   │   └── state.ts           initAuthCreds, memoryAuthState, own base64
 │   ├── transport/
 │   │   ├── types.ts           Transport interface + WhatsApp endpoints
-│   │   └── mock.ts            in-memory transport pair (tests)
+│   │   ├── mock.ts            in-memory transport pair (tests)
+│   │   └── mock-wa-server.ts  in-memory Noise responder + message relay (tests)
+│   ├── bot/
+│   │   ├── bot.ts             OniBot — command router
+│   │   └── monitor.ts         CPU / RAM / uptime sampling
 │   ├── events/
 │   │   └── emitter.ts         typed Emitter + OniwalibEvents
 │   ├── profiles/
@@ -268,7 +299,9 @@ oniwalib/
 │   ├── version.ts             oni-version: WhatsApp protocol version resolver
 │   └── index.ts
 ├── oni-version.json           the current known-good WA version (edit to update)
-├── test/                      version · wire · wabinary · noise · auth · socket
+├── examples/
+│   └── bot.ts                 basic bot: commands + CPU/RAM, over the mock server
+├── test/                      version · wire · wabinary · noise · auth · socket · bot
 ├── PUBLISH.md                 how to push and keep this repo updated
 ├── package.json · tsconfig.json · LICENSE · README.md
 ```

@@ -118,7 +118,7 @@
       </g>
       <g transform="translate(286,0)">
         <rect x="0" y="0" width="146" height="34" rx="17" fill="#ffffff" fill-opacity="0.10" stroke="#ffffff" stroke-opacity="0.22"/>
-        <text x="73" y="23" text-anchor="middle">98 tests green</text>
+        <text x="73" y="23" text-anchor="middle">126 tests green</text>
       </g>
     </g>
   </g>
