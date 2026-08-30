@@ -41,7 +41,17 @@ const bot = new OniBot({ name: "oni" });
 bot.register("coffee", "☕ (exemplo de comando custom)", () => "☕ aqui está");
 // Manda !buttons / !list / !table de outro número para testar os tipos ricos.
 
-const conn = openWhatsApp({ auth, saveCreds, profile: STOCK, countryCode: "BR" });
+// maxRetries alto: para um bot que fica no ar, quedas transitórias devem
+// reconectar DENTRO do processo (backoff exponencial, teto de 10s) em vez de
+// derrubar tudo. O `client.ts` ignora esse limite nos códigos de logout
+// (401/403/405/conflict/device_removed) — esses sim encerram de vez.
+const conn = openWhatsApp({
+  auth,
+  saveCreds,
+  profile: STOCK,
+  countryCode: "BR",
+  maxRetries: 1_000_000,
+});
 
 conn.events.on("connection.update", (u) => {
   if (u.qr) {
@@ -56,8 +66,10 @@ conn.events.on("connection.update", (u) => {
     console.log("   manda um !ping de outro número…");
   }
   if (u.connection === "close") {
-    console.log(`\n🔴 encerrada: ${u.lastDisconnect?.error?.message ?? "sem motivo"}`);
-    process.exit(u.lastDisconnect ? 1 : 0);
+    // Com maxRetries alto, só chega aqui em logout de verdade (sessão morta).
+    console.log(`\n🔴 sessão encerrada: ${u.lastDisconnect?.error?.message ?? "sem motivo"}`);
+    console.log("   (precisa parear de novo — apague ./oni-auth e rode `npm run bot`)");
+    process.exit(1);
   }
 });
 
