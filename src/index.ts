@@ -26,6 +26,7 @@ export {
   crypto,
   setCrypto,
   nodeAdapter,
+  rtsAdapter,
   RTS_GAPS,
   type Crypto,
   type KeyPair,

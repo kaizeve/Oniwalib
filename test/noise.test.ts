@@ -3,8 +3,12 @@
 // classe `NoiseHandshake`) — então o teste valida a lógica, não ela contra si
 // mesma.
 
-import { nodeAdapter as C } from "../src/crypto/node-adapter";
+import { crypto } from "../src/crypto";
 import { NoiseHandshake } from "../src/noise/handshake";
+
+// O adapter que o runtime suporta: node:crypto completo em bun/node, o trio
+// X25519 cru + createCipheriv no RTS. O handshake é o mesmo dos dois lados.
+const C = crypto();
 import { FrameDecoder, encodeFrame, introHeader } from "../src/noise/frame";
 
 let pass = 0;

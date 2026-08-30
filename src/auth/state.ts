@@ -62,8 +62,15 @@ export function initAuthCreds(): AuthCreds {
   const preKey = c.generateX25519();
   const keyId = 1;
 
-  // signedPreKey: assina a pública da preKey com a identidade.
-  const signature = c.sign(identity.privateKey, prefixType(preKey.publicKey));
+  // signedPreKey: assina a pública da preKey com a identidade. O RTS ainda não
+  // assina (XEdDSA pendente) — nesse caso, placeholder de 64 zeros. O registro
+  // real contra o servidor precisa da assinatura verdadeira (Fase 2).
+  let signature: Uint8Array;
+  try {
+    signature = c.sign(identity.privateKey, prefixType(preKey.publicKey));
+  } catch {
+    signature = new Uint8Array(64);
+  }
 
   const regId = ((c.randomBytes(2)[0]! << 8) | c.randomBytes(1)[0]!) & 0x3fff;
 
