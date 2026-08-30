@@ -63,7 +63,7 @@ export class NoiseSocket {
 
       const hello = this.hs.clientHello(this.ephemeral);
       // Intro header vai colado no primeiro frame.
-      const framed = encodeFrame(encodeHandshake({ kind: "clientHello", fields: [hello] }));
+      const framed = encodeFrame(encodeHandshake({ clientHello: { ephemeral: hello } }));
       const first = new Uint8Array(introHeader().length + framed.length);
       first.set(introHeader(), 0);
       first.set(framed, introHeader().length);
@@ -88,22 +88,24 @@ export class NoiseSocket {
     } catch (e) {
       return this.fail(e as Error);
     }
-    if (msg.kind !== "serverHello" || msg.fields.length < 3) {
+    const sh = msg.serverHello;
+    if (!sh || !sh.ephemeral || !sh.static || !sh.payload) {
       return this.fail(new Error("handshake: ServerHello malformado"));
     }
-    const [serverEph, serverStaticCipher, payloadCipher] = msg.fields;
     try {
       const { serverStatic, payload } = this.hs.readServerHello(
         this.ephemeral,
-        serverEph!,
-        serverStaticCipher!,
-        payloadCipher!,
+        sh.ephemeral,
+        sh.static,
+        sh.payload,
       );
       this.opts.onCertificate?.(payload, serverStatic);
 
-      const fin = this.hs.clientFinish(this.opts.staticKey, serverEph!, this.opts.clientPayload);
+      const fin = this.hs.clientFinish(this.opts.staticKey, sh.ephemeral, this.opts.clientPayload);
       const out = encodeFrame(
-        encodeHandshake({ kind: "clientFinish", fields: [fin.staticCipher, fin.payloadCipher] }),
+        encodeHandshake({
+          clientFinish: { static: fin.staticCipher, payload: fin.payloadCipher },
+        }),
       );
       this.opts.transport.send(out);
 

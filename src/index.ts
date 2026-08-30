@@ -18,6 +18,9 @@
 export * as frame from "./frame/index";
 export * as message from "./proto/message";
 export * as handshakeProto from "./proto/handshake";
+export { Reader as ProtoReader, Writer as ProtoWriter } from "./proto/wire";
+export { encodeClientPayload } from "./proto/client-payload";
+export { buildClientPayload } from "./proto/handshake";
 
 export { NoiseHandshake, type HandshakeResult } from "./noise/handshake";
 export { FrameDecoder, encodeFrame, introHeader } from "./noise/frame";

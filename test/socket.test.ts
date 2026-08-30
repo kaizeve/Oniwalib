@@ -106,8 +106,8 @@ class Server {
   private onFrame(frame: Uint8Array) {
     if (!this.fin) {
       const msg = decodeHandshake(frame);
-      if (msg.kind === "clientHello") {
-        const clientEph = msg.fields[0]!;
+      if (msg.clientHello?.ephemeral) {
+        const clientEph = msg.clientHello.ephemeral;
         this.mixHash(clientEph);
         this.mixHash(this.e.publicKey);
         this.mixKey(C.x25519(this.e.privateKey, clientEph));
@@ -117,15 +117,18 @@ class Server {
         this.t.send(
           encodeFrame(
             encodeHandshake({
-              kind: "serverHello",
-              fields: [this.e.publicKey, staticCipher, payloadCipher],
+              serverHello: {
+                ephemeral: this.e.publicKey,
+                static: staticCipher,
+                payload: payloadCipher,
+              },
             }),
           ),
         );
-      } else if (msg.kind === "clientFinish") {
-        const clientStatic = this.decr(msg.fields[0]!);
+      } else if (msg.clientFinish) {
+        const clientStatic = this.decr(msg.clientFinish.static!);
         this.mixKey(C.x25519(this.e.privateKey, clientStatic));
-        this.clientPayload = this.decr(msg.fields[1]!);
+        this.clientPayload = this.decr(msg.clientFinish.payload!);
         const o = C.hkdf(new Uint8Array(0), 64, { salt: this.salt });
         this.decKey = o.subarray(0, 32);
         this.encKey = o.subarray(32, 64);

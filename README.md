@@ -96,7 +96,7 @@ primitivos de criptografia que o motor ainda não expõe.
 | `frame/` | codec WABinary: binary node, buffers, JID, tabelas de token | ✅ | ✅ |
 | `noise/` | handshake XX + enquadramento | ✅ | ✅ |
 | `crypto/` | interface + adapter `node:crypto` (bun/node) e adapter RTS | ✅ | ✅ |
-| `proto/` | builders de mensagem (incl. botões/list/interactive) + shapes de handshake | ✅ | ✅ |
+| `proto/` | codec protobuf próprio (sem protobufjs) + builders de mensagem (botões/list/interactive) + `HandshakeMessage` e `ClientPayload` de fio | ✅ | ✅ |
 | `auth/` | credenciais + cofre de chaves Signal | ✅ | ✅¹ |
 | `events/` | superfície de eventos tipada | ✅ | ✅ |
 | `profiles/` | camada original vs modificada | ✅ | ✅ |
@@ -107,10 +107,11 @@ primitivos de criptografia que o motor ainda não expõe.
 a `signedPreKey` fica com assinatura placeholder até a Fase 2. Todo o resto
 roda nativo.</sub>
 
-**Testes:** `wabinary` 23 · `noise` 12 · `auth` 22 · `socket` 6 (integração:
-transporte → enquadramento → handshake XX → cripto de transporte → WABinary,
-ponta a ponta) → **63/63 em bun E no RTS** (`rts run`). Falta só a tomada real
-(TLS + WebSocket) para conectar no servidor do WhatsApp.
+**Testes:** `wire` 24 (codec protobuf + `HandshakeMessage`/`ClientPayload`) ·
+`wabinary` 23 · `noise` 12 · `auth` 22 · `socket` 6 (integração: transporte →
+enquadramento → handshake XX → cripto de transporte → WABinary, ponta a ponta)
+→ **87/87 em bun E no RTS** (`rts run`). Falta só a tomada real (TLS + WebSocket)
+para conectar no servidor do WhatsApp.
 
 ### A Fase 0 — estado no motor do RTS
 
@@ -213,8 +214,10 @@ oniwalib/
 │   │   ├── node-adapter.ts   implementação sobre node:crypto (referência)
 │   │   └── index.ts          crypto() / setCrypto()
 │   ├── proto/
+│   │   ├── wire.ts           codec protobuf mínimo (varint, length-delimited, fixed32/64)
 │   │   ├── message.ts        builders de body: text, buttons, list, template, interactive
-│   │   └── handshake.ts      HandshakeMessage / ClientPayload
+│   │   ├── handshake.ts      tipos ClientPayload + buildClientPayload
+│   │   └── client-payload.ts ClientPayload → bytes protobuf
 │   ├── auth/
 │   │   └── state.ts          initAuthCreds, memoryAuthState, base64 próprio
 │   ├── events/

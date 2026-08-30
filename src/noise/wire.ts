@@ -1,50 +1,73 @@
-// Serialização dos três frames do handshake.
+// `HandshakeMessage` — o protobuf que vai dentro dos frames do handshake Noise.
 //
-// PLACEHOLDER: o WhatsApp usa o protobuf `HandshakeMessage` (clientHello /
-// serverHello / clientFinish, cada um com campos `ephemeral` / `static` /
-// `payload`). Enquanto o `proto/` de fio (decisão D3) não entra, isto usa um
-// TLV simples — [tipo:1][n campos:1] então [len:2 BE][bytes]... — que é
-// suficiente para o handshake rodar entre dois NoiseSockets nos testes.
-// Trocar por protobuf real é reescrever só estas duas funções.
+// Campos reais do WAProto:
+//   HandshakeMessage { ClientHello clientHello = 2; ServerHello serverHello = 3;
+//                      ClientFinish clientFinish = 4; }
+//   ClientHello / ServerHello { bytes ephemeral = 1; bytes static = 2; bytes payload = 3; }
+//   ClientFinish              { bytes static = 1; bytes payload = 2; }
+//
+// Sobre o codec `proto/wire.ts` (varint + length-delimited), não sobre
+// protobufjs.
 
-export type HandshakeKind = "clientHello" | "serverHello" | "clientFinish";
+import { Reader, Writer } from "../proto/wire";
 
-const KIND_TO_TAG: Record<HandshakeKind, number> = {
-  clientHello: 1,
-  serverHello: 2,
-  clientFinish: 3,
-};
-const TAG_TO_KIND: Record<number, HandshakeKind> = {
-  1: "clientHello",
-  2: "serverHello",
-  3: "clientFinish",
-};
-
-export interface HandshakeMessage {
-  kind: HandshakeKind;
-  fields: Uint8Array[];
+export interface Hello {
+  ephemeral?: Uint8Array;
+  static?: Uint8Array;
+  payload?: Uint8Array;
 }
 
-export function encodeHandshake(msg: HandshakeMessage): Uint8Array {
-  const parts: number[] = [KIND_TO_TAG[msg.kind], msg.fields.length];
-  for (const f of msg.fields) {
-    parts.push((f.length >> 8) & 0xff, f.length & 0xff);
-    for (const b of f) parts.push(b);
+export interface ClientFinish {
+  static?: Uint8Array;
+  payload?: Uint8Array;
+}
+
+export interface HandshakeMessage {
+  clientHello?: Hello;
+  serverHello?: Hello;
+  clientFinish?: ClientFinish;
+}
+
+function encHello(h: Hello): Writer {
+  return new Writer().bytes(1, h.ephemeral).bytes(2, h.static).bytes(3, h.payload);
+}
+
+function decHello(bytes: Uint8Array): Hello {
+  const f = new Reader(bytes).fields();
+  return {
+    ephemeral: f.get(1)?.[0] as Uint8Array | undefined,
+    static: f.get(2)?.[0] as Uint8Array | undefined,
+    payload: f.get(3)?.[0] as Uint8Array | undefined,
+  };
+}
+
+export function encodeHandshake(m: HandshakeMessage): Uint8Array {
+  const w = new Writer();
+  if (m.clientHello) w.message(2, encHello(m.clientHello));
+  if (m.serverHello) w.message(3, encHello(m.serverHello));
+  if (m.clientFinish) {
+    w.message(
+      4,
+      new Writer().bytes(1, m.clientFinish.static).bytes(2, m.clientFinish.payload),
+    );
   }
-  return Uint8Array.from(parts);
+  return w.finish();
 }
 
 export function decodeHandshake(bytes: Uint8Array): HandshakeMessage {
-  const kind = TAG_TO_KIND[bytes[0]!];
-  if (!kind) throw new Error(`handshake: tag desconhecida ${bytes[0]}`);
-  const count = bytes[1]!;
-  const fields: Uint8Array[] = [];
-  let o = 2;
-  for (let i = 0; i < count; i++) {
-    const len = (bytes[o]! << 8) | bytes[o + 1]!;
-    o += 2;
-    fields.push(bytes.subarray(o, o + len));
-    o += len;
+  const f = new Reader(bytes).fields();
+  const out: HandshakeMessage = {};
+  const ch = f.get(2)?.[0];
+  const sh = f.get(3)?.[0];
+  const cf = f.get(4)?.[0];
+  if (ch instanceof Uint8Array) out.clientHello = decHello(ch);
+  if (sh instanceof Uint8Array) out.serverHello = decHello(sh);
+  if (cf instanceof Uint8Array) {
+    const cff = new Reader(cf).fields();
+    out.clientFinish = {
+      static: cff.get(1)?.[0] as Uint8Array | undefined,
+      payload: cff.get(2)?.[0] as Uint8Array | undefined,
+    };
   }
-  return { kind, fields };
+  return out;
 }
