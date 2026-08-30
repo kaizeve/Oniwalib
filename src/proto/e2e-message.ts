@@ -54,6 +54,28 @@ export interface E2EListMessage {
   sections?: Array<{ title?: string; rows?: E2EListRow[] }>;
 }
 
+/** MessageKey do WAProto — todos os campos opcionais no fio. */
+export interface E2EMessageKey {
+  remoteJid?: string;
+  fromMe?: boolean;
+  id?: string;
+  participant?: string;
+}
+
+export interface E2EReactionMessage {
+  key?: E2EMessageKey;
+  /** Emoji da reação. `""` = reação removida. */
+  text?: string;
+  groupingKey?: string;
+  senderTimestampMs?: number;
+}
+
+export interface E2EProtocolMessage {
+  key?: E2EMessageKey;
+  /** ProtocolMessage.Type — 0 REVOKE (apagar p/ todos), 3 EPHEMERAL_SETTING, … */
+  type?: number;
+}
+
 export interface E2EMessage {
   conversation?: string;
   extendedTextMessage?: { text?: string };
@@ -70,6 +92,34 @@ export interface E2EMessage {
     title?: string;
     description?: string;
     singleSelectReply?: { selectedRowId?: string };
+  };
+  reactionMessage?: E2EReactionMessage;
+  protocolMessage?: E2EProtocolMessage;
+}
+
+//   message MessageKey {
+//     string remoteJid   = 1;
+//     bool   fromMe       = 2;
+//     string id           = 3;
+//     string participant  = 4;
+//   }
+function messageKeyWriter(k: E2EMessageKey): Writer {
+  const w = new Writer();
+  w.string(1, k.remoteJid);
+  w.bool(2, !!k.fromMe);
+  w.string(3, k.id);
+  w.string(4, k.participant);
+  return w;
+}
+
+function decodeMessageKey(b: Uint8Array | undefined): E2EMessageKey | undefined {
+  if (!b) return undefined;
+  const f = new Reader(b).fields();
+  return {
+    remoteJid: asStr(f.get(1)?.[0]),
+    fromMe: f.get(2)?.[0] === 1,
+    id: asStr(f.get(3)?.[0]),
+    participant: asStr(f.get(4)?.[0]),
   };
 }
 
@@ -138,6 +188,22 @@ export function encodeE2EMessage(m: E2EMessage): Uint8Array {
     const r = m.buttonsResponseMessage;
     const sub = new Writer().string(1, r.selectedButtonId).string(2, r.selectedDisplayText);
     w.message(43, sub);
+  }
+  if (m.reactionMessage) {
+    const r = m.reactionMessage;
+    const sub = new Writer();
+    if (r.key) sub.message(1, messageKeyWriter(r.key));
+    sub.string(2, r.text);
+    sub.string(3, r.groupingKey);
+    if (r.senderTimestampMs) sub.uint(4, r.senderTimestampMs);
+    w.message(25, sub);
+  }
+  if (m.protocolMessage) {
+    const p = m.protocolMessage;
+    const sub = new Writer();
+    if (p.key) sub.message(1, messageKeyWriter(p.key));
+    sub.uint(2, p.type ?? 0); // REVOKE(0) não é escrito — decode trata ausência como 0
+    w.message(12, sub);
   }
   return w.finish();
 }
@@ -250,6 +316,28 @@ export function decodeE2EMessage(bytes: Uint8Array): E2EMessage {
     out.buttonsResponseMessage = {
       selectedButtonId: asStr(sf.get(1)?.[0]),
       selectedDisplayText: asStr(sf.get(2)?.[0]),
+    };
+  }
+
+  const rm = asBytes(f.get(25)?.[0]);
+  if (rm) {
+    const sf = new Reader(rm).fields();
+    const ts = sf.get(4)?.[0];
+    out.reactionMessage = {
+      key: decodeMessageKey(asBytes(sf.get(1)?.[0])),
+      text: asStr(sf.get(2)?.[0]) ?? "",
+      groupingKey: asStr(sf.get(3)?.[0]),
+      senderTimestampMs: typeof ts === "number" ? ts : undefined,
+    };
+  }
+
+  const pm = asBytes(f.get(12)?.[0]);
+  if (pm) {
+    const sf = new Reader(pm).fields();
+    const ty = sf.get(2)?.[0];
+    out.protocolMessage = {
+      key: decodeMessageKey(asBytes(sf.get(1)?.[0])),
+      type: typeof ty === "number" ? ty : 0,
     };
   }
 

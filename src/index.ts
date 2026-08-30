@@ -70,6 +70,17 @@ export {
   type MessagesLayerOptions,
 } from "./messages";
 
+export {
+  createPresenceLayer,
+  type PresenceLayer,
+  type PresenceLayerOptions,
+} from "./presence";
+export {
+  createNotificationsLayer,
+  type NotificationsLayer,
+  type NotificationsLayerOptions,
+} from "./notifications";
+
 export * as signal from "./signal/index";
 export {
   encodeE2EMessage,
@@ -79,6 +90,9 @@ export {
   type E2EButtonsMessage,
   type E2EListMessage,
   type E2EListRow,
+  type E2EMessageKey,
+  type E2EReactionMessage,
+  type E2EProtocolMessage,
 } from "./proto/e2e-message";
 
 export { MockWaServer, type MockMessage } from "./transport/mock-wa-server";
@@ -121,7 +135,14 @@ export {
   type FileAuthOptions,
 } from "./auth/file-state";
 
-export { Emitter, type OniwalibEvents, type MessageKey } from "./events/emitter";
+export {
+  Emitter,
+  type OniwalibEvents,
+  type MessageKey,
+  type WAPresence,
+  type PresenceData,
+  type ContactUpdate,
+} from "./events/emitter";
 export {
   STOCK,
   MODIFIED,

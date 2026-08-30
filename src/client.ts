@@ -8,10 +8,12 @@
 // mensagem chegam, são "ackadas" para o servidor não repetir, e repassadas cruas
 // em `events.on("node.recv")`. Ler o texto exige a camada Signal.
 
-import { Emitter } from "./events/emitter";
+import { Emitter, type MessageKey, type WAPresence } from "./events/emitter";
 import { connectOni } from "./connect";
 import { configureSuccessfulPairing } from "./pairing";
 import { createMessagesLayer, type MessagesLayer } from "./messages";
+import { createPresenceLayer, type PresenceLayer } from "./presence";
+import { createNotificationsLayer, type NotificationsLayer } from "./notifications";
 import type { E2EMessage } from "./proto/e2e-message";
 import { crypto as defaultCrypto } from "./crypto";
 import type { Crypto } from "./crypto/types";
@@ -64,6 +66,13 @@ export interface OniConnection {
   sendText(jid: string, text: string): Promise<{ id: string }>;
   /** Como `sendText`, mas com um `Message` inteiro — botões, lista, viewOnce… */
   sendMessage(jid: string, msg: E2EMessage): Promise<{ id: string }>;
+  /** Reage a uma mensagem (`emoji` vazio remove a reação). Precisa de sessão. */
+  sendReaction(jid: string, key: MessageKey, emoji: string): Promise<{ id: string }>;
+  /** Anuncia a nossa presença. `available`/`unavailable` é global; `composing`/
+   *  `recording`/`paused` é por chat e exige `toJid`. */
+  sendPresenceUpdate(type: WAPresence, toJid?: string): void;
+  /** Pede ao servidor a presença de `jid` (senão os `<presence>` dele não vêm). */
+  subscribePresence(jid: string): void;
   /** Fecha e não reconecta. */
   end(err?: Error): void;
   readonly state: "connecting" | "open" | "close";
@@ -140,6 +149,16 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     saveCreds: opts.saveCreds,
   });
   let preKeysUploaded = false;
+
+  // Presença (online/digitando) e notificações de perfil (foto/recado). Só
+  // fazem sentido depois do <success>; antes disso `send` lança.
+  const presence: PresenceLayer = createPresenceLayer({
+    events,
+    sendNode: send,
+    genId,
+    meId: () => auth.creds.me?.id,
+  });
+  const notifications: NotificationsLayer = createNotificationsLayer({ events });
 
   // --- handlers de stanza --------------------------------------------
 
@@ -308,8 +327,19 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
       case "notification":
         if (n.attrs.type === "encrypt") {
           void messages.onEncryptNotification().catch(() => {});
+        } else {
+          try {
+            notifications.handleNotification(n);
+          } catch {
+            /* notificação malformada — só ackeia */
+          }
         }
         return sendAck(n);
+      // Presença não leva <ack>.
+      case "presence":
+        return presence.handlePresence(n);
+      case "chatstate":
+        return presence.handleChatState(n);
       default:
         if (ACKABLE.has(n.tag)) sendAck(n);
     }
@@ -387,6 +417,9 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     sendNode: send,
     sendText: (jid, text) => messages.sendText(jid, text),
     sendMessage: (jid, msg) => messages.sendMessage(jid, msg),
+    sendReaction: (jid, key, emoji) => messages.sendReaction(jid, key, emoji),
+    sendPresenceUpdate: (type, toJid) => presence.sendPresenceUpdate(type, toJid),
+    subscribePresence: (jid) => presence.subscribePresence(jid),
     end,
     get state() {
       return state;

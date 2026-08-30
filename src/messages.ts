@@ -40,7 +40,12 @@ import {
   processSenderKeyDistribution,
   groupDecrypt,
 } from "./signal/sender-key";
-import { decodeE2EMessage, encodeE2EMessage, type E2EMessage } from "./proto/e2e-message";
+import {
+  decodeE2EMessage,
+  encodeE2EMessage,
+  type E2EMessage,
+  type E2EMessageKey,
+} from "./proto/e2e-message";
 import type { MessageKey } from "./events/emitter";
 
 export interface MessagesLayerOptions {
@@ -60,6 +65,8 @@ export interface MessagesLayer {
   sendText(jid: string, text: string): Promise<{ id: string }>;
   /** Cifra e envia um `Message` qualquer (texto, botões, lista, …). */
   sendMessage(jid: string, msg: E2EMessage): Promise<{ id: string }>;
+  /** Reage a uma mensagem. `emoji` vazio (`""`) remove a reação. */
+  sendReaction(jid: string, key: MessageKey, emoji: string): Promise<{ id: string }>;
   uploadPreKeys(range?: number): Promise<void>;
   /** Servidor avisou que o estoque de pré-chaves baixou. */
   onEncryptNotification(): Promise<void>;
@@ -253,6 +260,23 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     const deliver = (plain: Uint8Array): E2EMessage => {
       let msg: E2EMessage = decodeE2EMessage(plain);
       if (msg.deviceSentMessage?.message) msg = msg.deviceSentMessage.message;
+
+      // Reação: não é uma mensagem de chat — sai por `messages.reaction`.
+      if (msg.reactionMessage?.key) {
+        const r = msg.reactionMessage;
+        events.emit("messages.reaction", {
+          key: toMsgKey(r.key, chatId),
+          reaction: { text: r.text, senderTimestampMs: r.senderTimestampMs, key: baseKey },
+        });
+        return msg;
+      }
+
+      // "Apagar para todos" (protocolMessage REVOKE, type 0).
+      if (msg.protocolMessage && (msg.protocolMessage.type ?? 0) === 0 && msg.protocolMessage.key) {
+        events.emit("messages.delete", { keys: [toMsgKey(msg.protocolMessage.key, chatId)] });
+        return msg;
+      }
+
       const bareSkdm =
         !!msg.senderKeyDistributionMessage &&
         !msg.conversation &&
@@ -322,6 +346,25 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     return sendMessage(jid, { conversation: text });
   }
 
+  async function sendReaction(
+    jid: string,
+    key: MessageKey,
+    emoji: string,
+  ): Promise<{ id: string }> {
+    return sendMessage(jid, {
+      reactionMessage: {
+        key: {
+          remoteJid: key.remoteJid,
+          fromMe: key.fromMe,
+          id: key.id,
+          participant: key.participant,
+        },
+        text: emoji,
+        senderTimestampMs: Date.now(),
+      },
+    });
+  }
+
   async function sendMessage(jid: string, msg: E2EMessage): Promise<{ id: string }> {
     return serial(async () => {
       const addr = signalAddress(jid);
@@ -375,6 +418,16 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     return type === "skmsg" ? 9 : type === "pkmsg" ? 0 : 1;
   }
 
+  // MessageKey do fio → MessageKey do evento, com o chat como fallback do jid.
+  function toMsgKey(k: E2EMessageKey | undefined, fallbackJid: string): MessageKey {
+    return {
+      remoteJid: k?.remoteJid || fallbackJid,
+      fromMe: !!k?.fromMe,
+      id: k?.id || "",
+      ...(k?.participant ? { participant: k.participant } : {}),
+    };
+  }
+
   async function loadSenderKey(name: string): Promise<SenderKeyRecord> {
     const { [name]: raw } = await auth.keys.get("sender-key", [name]);
     return raw ? SenderKeyRecord.deserialize(raw) : new SenderKeyRecord();
@@ -386,5 +439,12 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
 
   void meUser;
 
-  return { handleMessageStanza, sendText, sendMessage, uploadPreKeys, onEncryptNotification };
+  return {
+    handleMessageStanza,
+    sendText,
+    sendMessage,
+    sendReaction,
+    uploadPreKeys,
+    onEncryptNotification,
+  };
 }
