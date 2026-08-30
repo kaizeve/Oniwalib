@@ -46,6 +46,10 @@ export const nodeAdapter: Crypto = {
     return u8(nodeCrypto.createHmac("sha256", key).update(data).digest());
   },
 
+  md5(data) {
+    return u8(nodeCrypto.createHash("md5").update(data).digest());
+  },
+
   hkdf(ikm, length, opts) {
     const salt = opts.salt ?? new Uint8Array(32);
     const info = opts.info ?? new Uint8Array(0);

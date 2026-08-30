@@ -9,7 +9,7 @@ It talks the socket directly — no browser, no Puppeteer, no headless Chrome.
 
 <br>
 
-[![tests](https://img.shields.io/badge/tests-87%2F87%20passing-2ea44f?style=flat-square)](#tests)
+[![tests](https://img.shields.io/badge/tests-98%2F98%20passing-2ea44f?style=flat-square)](#tests)
 [![runtimes](https://img.shields.io/badge/runs%20on-bun%20%C2%B7%20node%20%C2%B7%20RTS-0b7285?style=flat-square)](#status)
 [![language](https://img.shields.io/badge/TypeScript-3178c6?style=flat-square&logo=typescript&logoColor=white)](#)
 [![status](https://img.shields.io/badge/status-early%20%C2%B7%20foundation-d9822b?style=flat-square)](#status)
@@ -130,10 +130,33 @@ What's left to actually connect is the transport layer (TLS + WebSocket client).
 
 ### <a name="tests"></a>Tests
 
-`wire` 24 (protobuf codec + `HandshakeMessage` / `ClientPayload`) · `wabinary`
-23 · `noise` 12 · `auth` 22 · `socket` 6 (integration: transport → framing → XX
-handshake → transport crypto → WABinary, end to end) → **87 / 87 on bun AND on
-RTS**.
+`version` 11 · `wire` 24 (protobuf codec + `HandshakeMessage` / `ClientPayload`)
+· `wabinary` 23 · `noise` 12 · `auth` 22 · `socket` 6 (integration: transport →
+framing → XX handshake → transport crypto → WABinary, end to end) → **98 / 98 on
+bun AND on RTS**.
+
+### <a name="oni-version"></a>Keeping it working — the oni-version
+
+WhatsApp Web announces a protocol version tuple `[2, minor, patch]` in the
+handshake. When WhatsApp bumps it on their side, a client still sending the old
+one stops working — the QR won't connect, login is refused.
+
+`oniwalib` handles this the way Baileys does, without needing a new release:
+
+- `oni-version.json` at the repo root holds the current known-good tuple. **Edit
+  it and every client that calls `resolveOniVersion()` picks it up** over
+  `raw.githubusercontent`.
+- `resolveOniVersion()` resolves in order: explicit `override` → cached →
+  fetched (from `oni-version.json`, then a live parse of `web.whatsapp.com`) →
+  the built-in fallback.
+- `versionBuildHash()` derives the `buildHash` the registration payload needs
+  from the tuple.
+
+```ts
+import { resolveOniVersion } from "oniwalib";
+
+const { version, source } = await resolveOniVersion();   // e.g. [2, 3000, 1023223821] from "fetch"
+```
 
 ---
 
@@ -242,8 +265,10 @@ oniwalib/
 │   │   └── emitter.ts         typed Emitter + OniwalibEvents
 │   ├── profiles/
 │   │   └── index.ts           STOCK vs MODIFIED
+│   ├── version.ts             oni-version: WhatsApp protocol version resolver
 │   └── index.ts
-├── test/                      wire · wabinary · noise · auth · socket
+├── oni-version.json           the current known-good WA version (edit to update)
+├── test/                      version · wire · wabinary · noise · auth · socket
 ├── PUBLISH.md                 how to push and keep this repo updated
 ├── package.json · tsconfig.json · LICENSE · README.md
 ```

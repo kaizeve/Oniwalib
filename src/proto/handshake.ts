@@ -58,7 +58,7 @@ function u24be(n: number): Uint8Array {
 export function buildClientPayload(
   creds: AuthCreds,
   profile: ClientProfile,
-  opts: { phoneNumber?: string } = {},
+  opts: { phoneNumber?: string; buildHash?: Uint8Array } = {},
 ): ClientPayload {
   const [primary, secondary, tertiary] = profile.waVersion;
   const base: ClientPayload = {
@@ -96,7 +96,9 @@ export function buildClientPayload(
     eSkeyId: u24be(creds.signedPreKey.keyId),
     eSkeyVal: creds.signedPreKey.keyPair.publicKey,
     eSkeySig: creds.signedPreKey.signature,
-    buildHash: new Uint8Array(16), // md5 do appVersion — preenchido no proto de fio
+    // md5("major.minor.patch") — ver `versionBuildHash` em `version.ts`. Sem
+    // ele passado, 16 zeros (placeholder até o registro real, Fase 2).
+    buildHash: opts.buildHash ?? new Uint8Array(16),
     deviceProps: new Uint8Array(0),
   };
   return base;

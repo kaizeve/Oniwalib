@@ -61,3 +61,16 @@ export {
   resolveProfile,
   type ClientProfile,
 } from "./profiles/index";
+
+export {
+  resolveOniVersion,
+  fetchLatestOniVersion,
+  versionBuildHash,
+  memoryVersionStore,
+  DEFAULT_ONI_VERSION,
+  DEFAULT_SOURCES,
+  type OniVersion,
+  type VersionStore,
+  type ResolveOptions,
+  type ResolvedVersion,
+} from "./version";

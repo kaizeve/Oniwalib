@@ -27,6 +27,9 @@ export interface Crypto {
   /** HMAC-SHA-256. */
   hmacSha256(key: Uint8Array, data: Uint8Array): Uint8Array;
 
+  /** MD5 — só para o `buildHash` do handshake (não é primitivo de segurança). */
+  md5?(data: Uint8Array): Uint8Array;
+
   /** HKDF-SHA-256 → `length` bytes. */
   hkdf(ikm: Uint8Array, length: number, opts: { salt?: Uint8Array; info?: Uint8Array }): Uint8Array;
 

@@ -1,0 +1,5 @@
+{
+  "version": [2, 3000, 1023223821],
+  "updated": "2026-08-30",
+  "note": "A versao do protocolo WhatsApp Web que o oniwalib anuncia no handshake. Edite [major, minor, patch] aqui quando o WhatsApp subir a versao e o QR parar de conectar — todo cliente que chama resolveOniVersion() pega este arquivo via raw.githubusercontent, sem precisar de release nova."
+}
