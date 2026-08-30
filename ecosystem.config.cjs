@@ -1,13 +1,16 @@
 // pm2 — mantém o OniBot no ar e SEMPRE na versão atual da lib.
 //
-//   npm run bot:up        # sobe (roda via bun) e abre os logs
-//   npm run bot:restart   # reinício manual
-//   npm run bot:down      # derruba
-//   npm run bot:logs      # acompanha
+//   npm run bot:up          # sobe com watch (recarrega ao salvar código)
+//   npm run bot:up:stable    # sobe SEM watch (pra hackear vários arquivos)
+//   npm run bot:restart      # reinício manual
+//   npm run bot:down         # derruba
+//   npm run bot:logs         # acompanha
 //
-// `watch` está ligado em src/ e examples/: qualquer alteração no código
-// reinicia o processo sozinho. A sessão fica em ./oni-auth/ e é reaproveitada,
-// então o bot volta sem QR — é isso que o deixa "atualizado sempre".
+// `watch` observa SÓ `src/` e `examples/` (nunca `oni-auth/`, que o bot
+// reescreve a cada reconexão). Salvou um `.ts` → recarrega, reaproveitando a
+// sessão em `./oni-auth/` (sem QR). Editar MUITOS arquivos seguidos derruba e
+// sobe o bot toda hora — nesse caso use `bot:up:stable` e depois `bot:restart`.
+// PM2_BOT_WATCH=off também desliga o watch.
 //
 // pm2 não é dependência do projeto; `npx pm2 …` baixa sob demanda. Precisa de
 // uma sessão já pareada (rode `npm run bot` uma vez e escaneie o QR).
@@ -32,14 +35,24 @@ module.exports = {
 
       // Recarrega quando o CÓDIGO muda. `oni-auth/` fica de fora (o bot
       // reescreve as credenciais a cada reconexão — se entrasse aqui, loop).
-      watch: ["src", "examples", "oni-version.json"],
-      ignore_watch: ["oni-auth", "node_modules", ".git", "test", "scripts", "assets", "logs", "*.log"],
-      watch_delay: 2500,
+      watch: process.env.PM2_BOT_WATCH === "off" ? false : ["src", "examples", "oni-version.json"],
+      ignore_watch: [
+        "oni-auth",
+        "node_modules",
+        "\\.git",
+        "test",
+        "scripts",
+        "assets",
+        "logs",
+        "\\.log$",
+        "\\.owl",
+      ],
+      watch_delay: 4000,
 
       autorestart: true,
       restart_delay: 3000,
-      max_restarts: 50,
-      min_uptime: "8s",
+      max_restarts: 100,
+      min_uptime: "15s",
       kill_timeout: 8000,
 
       time: true,
