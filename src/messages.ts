@@ -248,13 +248,12 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
       ...(a.participant ? { participant: a.participant } : {}),
     };
 
-    // Decodifica o plaintext e emite `messages.upsert` — a menos que seja só o
-    // SKDM de um pairwise de grupo (plumbing, sem conteúdo pra entregar).
+    // Decodifica o plaintext e emite `messages.upsert` — a menos que a mensagem
+    // seja só um SenderKeyDistributionMessage (plumbing de grupo, sem conteúdo).
     const deliver = (plain: Uint8Array): E2EMessage => {
       let msg: E2EMessage = decodeE2EMessage(plain);
       if (msg.deviceSentMessage?.message) msg = msg.deviceSentMessage.message;
       const bareSkdm =
-        isGroup &&
         !!msg.senderKeyDistributionMessage &&
         !msg.conversation &&
         !msg.extendedTextMessage &&
@@ -269,6 +268,20 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
         });
       }
       return msg;
+    };
+
+    // Guarda a cadeia de um SenderKeyDistributionMessage. Ele chega ou junto do
+    // `skmsg` (stanza de grupo, `groupId` = a própria stanza), ou avulso numa
+    // stanza 1:1 do remetente (aí o `groupId` vem DENTRO do SKDM).
+    const absorbSkdm = async (msg: E2EMessage): Promise<void> => {
+      const skdm = msg.senderKeyDistributionMessage;
+      if (!skdm?.axolotlSenderKeyDistributionMessage) return;
+      const groupId = isGroup ? from : skdm.groupId;
+      if (!groupId) return;
+      const name = `${groupId}::${addr}`;
+      const rec = await loadSenderKey(name);
+      processSenderKeyDistribution(rec, skdm.axolotlSenderKeyDistributionMessage);
+      await storeSenderKey(name, rec);
     };
 
     // Uma stanza por vez: os ratchets mutam estado e não são reentrantes.
@@ -287,15 +300,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
           }
 
           const plain = unpad(await decryptEnc(type, addr, body));
-          const msg = deliver(plain);
-
-          // Num grupo, o pairwise carrega o SKDM do remetente — guarda a cadeia.
-          const skdm = msg.senderKeyDistributionMessage?.axolotlSenderKeyDistributionMessage;
-          if (isGroup && skdm) {
-            const rec = await loadSenderKey(skName);
-            processSenderKeyDistribution(rec, skdm);
-            await storeSenderKey(skName, rec);
-          }
+          await absorbSkdm(deliver(plain));
         } catch (err) {
           events.emit("messages.upsert", {
             type: "notify",

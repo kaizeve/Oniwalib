@@ -84,6 +84,13 @@ export function encodeE2EMessage(m: E2EMessage): Uint8Array {
     if (m.deviceSentMessage.message) sub.bytes(2, encodeE2EMessage(m.deviceSentMessage.message));
     w.message(31, sub);
   }
+  if (m.senderKeyDistributionMessage) {
+    const s = m.senderKeyDistributionMessage;
+    w.message(
+      2,
+      new Writer().string(1, s.groupId).bytes(2, s.axolotlSenderKeyDistributionMessage),
+    );
+  }
   if (m.listMessage) {
     const l = m.listMessage;
     const sub = new Writer();

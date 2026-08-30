@@ -18,7 +18,12 @@ import {
   type SignalDeps,
 } from "../src/signal/index";
 import { createMessagesLayer } from "../src/messages";
-import { encodeE2EMessage, decodeE2EMessage } from "../src/proto/e2e-message";
+import { encodeE2EMessage, decodeE2EMessage, messageText } from "../src/proto/e2e-message";
+import {
+  SenderKeyRecord,
+  createSenderKeyDistribution,
+  groupEncrypt,
+} from "../src/signal/sender-key";
 
 const C = crypto();
 let pass = 0;
@@ -187,6 +192,55 @@ sent.length = 0;
   await layer.handleMessageStanza(stanza);
   const r2 = getBinaryNodeChild(sent.find((n) => n.tag === "receipt" && n.attrs.type === "retry"), "retry");
   ok("retry: count=2 no reenvio", r2?.attrs.count === "2");
+}
+
+// --- LEITURA DE GRUPO ponta a ponta -----------------------------------
+// SKDM avulso (stanza 1:1 do remetente, groupId dentro) → depois um <skmsg>
+// no grupo → o bot decifra e emite o texto.
+sent.length = 0;
+upserts.length = 0;
+{
+  const GROUP = "999888777@g.us";
+  // O "remetente" é o mesmo usuário que já tem sessão pairwise com o bot.
+  const senderRec = new SenderKeyRecord();
+  const skdmBytes = createSenderKeyDistribution(C, senderRec);
+
+  // 1) SKDM cifrado 1:1 para o bot (from = usuário, NÃO o grupo).
+  const skdmMsg = encodeE2EMessage({
+    senderKeyDistributionMessage: {
+      groupId: GROUP,
+      axolotlSenderKeyDistributionMessage: skdmBytes,
+    },
+  });
+  const padded = new Uint8Array(skdmMsg.length + 5);
+  padded.set(skdmMsg);
+  padded.fill(5, skdmMsg.length);
+  const skdmEnc = await sigEncrypt(userDeps, "bot.0", padded);
+  await layer.handleMessageStanza(
+    node("message", { from: USER_JID, id: "sk1", t: "1700000010" }, [
+      node("enc", { v: "2", type: skdmEnc.type === 3 ? "pkmsg" : "msg" }, skdmEnc.body),
+    ]),
+  );
+  ok("SKDM avulso não vira upsert", upserts.length === 0);
+
+  // 2) mensagem de grupo cifrada com sender key.
+  const groupPlain = encodeE2EMessage({ conversation: "oi galera do grupo" });
+  const gp = new Uint8Array(groupPlain.length + 7);
+  gp.set(groupPlain);
+  gp.fill(7, groupPlain.length);
+  const skCiphertext = groupEncrypt(C, senderRec, gp);
+  await layer.handleMessageStanza(
+    node("message", { from: GROUP, participant: USER_JID, id: "g2", t: "1700000011" }, [
+      node("enc", { v: "2", type: "skmsg" }, skCiphertext),
+    ]),
+  );
+
+  const up = upserts.find((u) => u.messages?.[0]?.key?.id === "g2");
+  ok("grupo: emitiu upsert", !!up);
+  ok("grupo: texto decifrado", messageText(up?.messages?.[0]?.message) === "oi galera do grupo", JSON.stringify(up?.messages?.[0]?.message));
+  ok("grupo: key.remoteJid = grupo", up?.messages?.[0]?.key?.remoteJid === GROUP);
+  ok("grupo: key.participant = remetente", up?.messages?.[0]?.key?.participant === USER_JID);
+  ok("grupo: sem retry (decifrou de primeira)", !sent.some((n) => n.attrs?.type === "retry"));
 }
 
 const rt =
