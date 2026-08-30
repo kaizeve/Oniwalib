@@ -100,15 +100,17 @@ primitivos de criptografia que o motor ainda não expõe.
 | `auth/` | credenciais + cofre de chaves Signal | ✅ | ✅¹ |
 | `events/` | superfície de eventos tipada | ✅ | ✅ |
 | `profiles/` | camada original vs modificada | ✅ | ✅ |
-| `transport/` | TLS + WebSocket cliente | ⛔ | ⛔ |
+| `transport/` | interface `Transport` + `MockTransport` + `NoiseSocket` (handshake→cripto→WABinary sobre um transporte) | ✅ | ✅ |
+| `transport/` — conector real | TLS + WebSocket cliente com headers/Origin custom | ⛔ | ⛔ |
 
 <sub>¹ A assinatura de identidade (XEdDSA) ainda não existe no RTS — no motor,
 a `signedPreKey` fica com assinatura placeholder até a Fase 2. Todo o resto
 roda nativo.</sub>
 
-**Testes:** `wabinary` 23 · `noise` 12 (handshake XX completo, ponta a ponta) ·
-`auth` 22 → **57/57 em bun E no RTS** (`rts run`). O handshake Noise inteiro
-executa no motor do RTS.
+**Testes:** `wabinary` 23 · `noise` 12 · `auth` 22 · `socket` 6 (integração:
+transporte → enquadramento → handshake XX → cripto de transporte → WABinary,
+ponta a ponta) → **63/63 em bun E no RTS** (`rts run`). Falta só a tomada real
+(TLS + WebSocket) para conectar no servidor do WhatsApp.
 
 ### A Fase 0 — estado no motor do RTS
 
@@ -200,7 +202,12 @@ oniwalib/
 │   │   └── index.ts
 │   ├── noise/
 │   │   ├── frame.ts          enquadramento [len de 3 bytes][payload] + intro
-│   │   └── handshake.ts      Noise_XX_25519_AESGCM_SHA256, lado cliente
+│   │   ├── handshake.ts      Noise_XX_25519_AESGCM_SHA256, lado cliente
+│   │   ├── wire.ts           serialização dos 3 frames do handshake (placeholder → protobuf)
+│   │   └── socket.ts         NoiseSocket: transporte + handshake + WABinary numa conexão
+│   ├── transport/
+│   │   ├── types.ts          interface Transport + endpoints do WhatsApp
+│   │   └── mock.ts           par de transportes em memória (testes)
 │   ├── crypto/
 │   │   ├── types.ts          a interface Crypto (a fronteira de plataforma)
 │   │   ├── node-adapter.ts   implementação sobre node:crypto (referência)

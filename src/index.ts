@@ -21,6 +21,15 @@ export * as handshakeProto from "./proto/handshake";
 
 export { NoiseHandshake, type HandshakeResult } from "./noise/handshake";
 export { FrameDecoder, encodeFrame, introHeader } from "./noise/frame";
+export { NoiseSocket, type NoiseSocketOptions } from "./noise/socket";
+export {
+  type Transport,
+  type Connector,
+  type ConnectOptions,
+  WA_WS_ENDPOINT,
+  WA_WS_ORIGIN,
+} from "./transport/types";
+export { mockTransportPair } from "./transport/mock";
 
 export {
   crypto,

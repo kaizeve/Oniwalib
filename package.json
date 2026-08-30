@@ -6,8 +6,8 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
-    "test": "bun test/wabinary.test.ts && bun test/noise.test.ts && bun test/auth.test.ts",
-    "test:rts": "../rts/target/fast/rts run test/wabinary.test.ts && ../rts/target/fast/rts run test/noise.test.ts && ../rts/target/fast/rts run test/auth.test.ts"
+    "test": "for f in wabinary noise auth socket; do bun test/$f.test.ts || exit 1; done",
+    "test:rts": "for f in wabinary noise auth socket; do ../rts/target/fast/rts run test/$f.test.ts || exit 1; done"
   },
   "author": "loveless",
   "license": "SEE LICENSE IN LICENSE"
