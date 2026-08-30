@@ -1,0 +1,14 @@
+{
+  "name": "oniwalib",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cliente WhatsApp Multi-Device sobre o RTS (nome provisorio). Estilo Baileys: socket direto, sem navegador.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "bun test/wabinary.test.ts && bun test/noise.test.ts && bun test/auth.test.ts",
+    "test:rts": "../rts/target/fast/rts run test/wabinary.test.ts && ../rts/target/fast/rts run test/noise.test.ts && ../rts/target/fast/rts run test/auth.test.ts"
+  },
+  "author": "loveless",
+  "license": "SEE LICENSE IN LICENSE"
+}
