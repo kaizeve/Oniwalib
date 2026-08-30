@@ -64,19 +64,41 @@ ok("prefixo errado ignora", (await pbot.handle(mk("!ping"))) === undefined);
 
 // --- respostas ricas: botões, lista, tabela ----------------------
 {
-  const r = (await bot.handle(mk("!buttons"))) as any;
-  ok("!buttons → buttonsMessage", !!r?.buttonsMessage);
-  ok("!buttons: 3 botões", r.buttonsMessage.buttons.length === 3);
-  ok("!buttons: id = comando", r.buttonsMessage.buttons[0].buttonId === "!ping");
-  ok("!buttons: displayText", r.buttonsMessage.buttons[0].buttonText.displayText.includes("ping"));
+  const r = (await bot.handle(mk("!buttons"))) as any[];
+  ok("!buttons → 2 mensagens (texto + botões)", Array.isArray(r) && r.length === 2);
+  ok("!buttons: 1ª é o menu em texto", typeof r[0] === "string" && r[0].includes("!ping"));
+  ok("!buttons: menu de texto pede número ou comando", r[0].includes("responda com o número"));
+  const nf = r[1]?.viewOnceMessage?.message?.interactiveMessage?.nativeFlowMessage;
+  ok("!buttons: 2ª é interactiveMessage em viewOnce", !!nf);
+  ok("!buttons: 3 botões", nf.buttons.length === 3);
+  ok("!buttons: name = quick_reply", nf.buttons[0].name === "quick_reply");
+  ok("!buttons: id = comando", JSON.parse(nf.buttons[0].buttonParamsJson).id === "!ping");
+  ok(
+    "!buttons: viewOnce traz messageContextInfo v2",
+    r[1].viewOnceMessage.message.messageContextInfo.deviceListMetadataVersion === 2,
+  );
 }
 {
-  const r = (await bot.handle(mk("!list"))) as any;
-  const m = (await bot.handle(mk("!menu"))) as any;
-  ok("!list → listMessage", !!r?.listMessage);
+  const r = (await bot.handle(mk("!list"))) as any[];
+  const m = (await bot.handle(mk("!menu"))) as any[];
+  ok("!list → 2 mensagens", Array.isArray(r) && r.length === 2);
+  ok("!list: 1ª é texto com as 4 linhas", typeof r[0] === "string" && r[0].includes("!uptime"));
   ok("!menu é alias", JSON.stringify(m) === JSON.stringify(r));
-  ok("!list: 2 seções", r.listMessage.sections.length === 2);
-  ok("!list: rowId = comando", r.listMessage.sections[0].rows[0].rowId === "!ping");
+  const btn = r[1]?.viewOnceMessage?.message?.interactiveMessage?.nativeFlowMessage?.buttons?.[0];
+  ok("!list → native flow single_select", btn?.name === "single_select");
+  const params = JSON.parse(btn.buttonParamsJson);
+  ok("!list: 2 seções", params.sections.length === 2);
+  ok("!list: id = comando", params.sections[0].rows[0].id === "!ping");
+}
+{
+  // resposta numérica a um menu → roda o comando daquela linha
+  await bot.handle(mk("!buttons")); // arma o menu no chat "u"
+  const byNum = await bot.handle(mk("2"));
+  ok("menu: '2' roda !status", typeof byNum === "string" && (byNum as string).includes("uptime"));
+  const byEmoji = await bot.handle(mk("1️⃣"));
+  ok("menu: '1️⃣' roda !ping", byEmoji === "pong");
+  const noMenu = await bot.handle({ from: "sem-menu", id: "1", text: "2" });
+  ok("número sem menu no chat → undefined", noMenu === undefined);
 }
 {
   const r = (await bot.handle(mk("!table"))) as string;

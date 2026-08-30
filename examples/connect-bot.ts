@@ -11,12 +11,15 @@
 // pré-chaves logo após o `<success>`.
 //
 // Comandos: !ping (mostra a latência WhatsApp→bot), !status, !table (tabela
-// monoespaçada), !buttons e !list/!menu (botões e lista interativos —
-// buttonsMessage / listMessage; o toque volta como o id `!comando` e cai no
-// mesmo handler). !help lista tudo.
+// monoespaçada), !buttons e !list/!menu (botões e lista interativos via
+// `interactiveMessage`/native flow embrulhado em viewOnce — o WhatsApp não
+// desenha mais os `buttonsMessage`/`listMessage` legados de cliente não-oficial;
+// o toque volta como o id `!comando` e cai no mesmo handler). !help lista tudo.
 //
-// Grupos: LÊ (decifra `skmsg` via sender keys) e loga. RESPONDER em grupo
-// (nosso sender key + distribuição USync) ainda é fase 2.
+// Grupos: LÊ (decifra `skmsg` via sender keys) E RESPONDE — cria o nosso sender
+// key, manda `skmsg`, e distribui o SKDM 1:1 pra quem já tem sessão pairwise
+// com o bot. Quem nunca falou no grupo desde que o bot subiu não vê a resposta
+// (falta USync/cold-send pra buscar o bundle desses).
 //
 // Ainda NÃO: mídia, e cold-send — só dá para responder 1:1 quem já te mandou
 // mensagem (a sessão vem daí). Precisa de `WebSocket` cliente com header Origin
@@ -82,24 +85,30 @@ conn.events.on("messages.upsert", ({ messages }) => {
     const inGroup = from.endsWith("@g.us");
     console.log(`← ${inGroup ? `[grupo ${from}] ` : ""}${m.pushName ?? from}: ${text}`);
 
-    if (inGroup) {
-      // Grupo já é LIDO (sender keys). RESPONDER em grupo precisa do nosso
-      // próprio sender key + distribuição via USync — fase 2. Só logamos.
-      continue;
-    }
-
+    // Grupo: respondemos com sender key (skmsg) + distribuição do NOSSO SKDM
+    // 1:1 para quem já tem sessão pairwise com a gente. Quem nunca falou no
+    // grupo desde que o bot subiu não recebe o SKDM e não vê a resposta —
+    // USync/cold-send é a próxima fase.
     const incoming: IncomingMessage = { from, id: m.key.id, text, timestamp: m.messageTimestamp };
-    void bot.handle(incoming).then((reply) => {
+    void bot.handle(incoming).then(async (reply) => {
       if (reply === undefined) return;
-      const t0 = Date.now();
-      const send =
-        typeof reply === "string" ? conn.sendText(from, reply) : conn.sendMessage(from, reply);
-      send
-        .then(() => {
-          const kind = typeof reply === "string" ? reply : Object.keys(reply)[0];
+      // Um comando pode devolver uma lista (ex.: menu em texto + em botões).
+      for (const r of Array.isArray(reply) ? reply : [reply]) {
+        const t0 = Date.now();
+        try {
+          if (typeof r === "string") await conn.sendText(from, r);
+          else await conn.sendMessage(from, r);
+          const kind =
+            typeof r === "string"
+              ? r.split("\n")[0]
+              : Object.keys(r.viewOnceMessage?.message ?? r).filter(
+                  (k) => k !== "messageContextInfo",
+                )[0] ?? "message";
           console.log(`→ ${from}: ${kind}  (envio ${Date.now() - t0}ms)`);
-        })
-        .catch((e) => console.error(`falha ao responder ${from}:`, (e as Error).message));
+        } catch (e) {
+          console.error(`falha ao responder ${from}:`, (e as Error).message);
+        }
+      }
     });
   }
 });

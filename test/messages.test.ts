@@ -6,7 +6,12 @@
 import { memoryAuthState } from "../src/auth/state";
 import { crypto } from "../src/crypto";
 import { Emitter } from "../src/events/emitter";
-import { node, getBinaryNodeChild, type BinaryNode } from "../src/frame/node";
+import {
+  node,
+  getBinaryNodeChild,
+  getBinaryNodeChildren,
+  type BinaryNode,
+} from "../src/frame/node";
 import {
   makeCurve,
   makeSignalStorage,
@@ -23,6 +28,8 @@ import {
   SenderKeyRecord,
   createSenderKeyDistribution,
   groupEncrypt,
+  groupDecrypt,
+  processSenderKeyDistribution,
 } from "../src/signal/sender-key";
 
 const C = crypto();
@@ -241,6 +248,42 @@ upserts.length = 0;
   ok("grupo: key.remoteJid = grupo", up?.messages?.[0]?.key?.remoteJid === GROUP);
   ok("grupo: key.participant = remetente", up?.messages?.[0]?.key?.participant === USER_JID);
   ok("grupo: sem retry (decifrou de primeira)", !sent.some((n) => n.attrs?.type === "retry"));
+
+  // --- ENVIO EM GRUPO ponta a ponta ---------------------------------
+  // O bot já conhece USER_JID como peer do GROUP (o SKDM avulso acima).
+  sent.length = 0;
+  await layer.sendMessage(GROUP, { conversation: "resposta no grupo" });
+
+  const gmsg = sent.find((n) => n.tag === "message" && n.attrs.to === GROUP);
+  ok("envio grupo: <message to=grupo type=text>", !!gmsg && gmsg.attrs.type === "text");
+  const parts = getBinaryNodeChild(gmsg, "participants");
+  const toNode = getBinaryNodeChildren(parts, "to")[0];
+  ok("envio grupo: <participants><to jid=usuário>", toNode?.attrs.jid === USER_JID);
+  const pwEnc = getBinaryNodeChild(toNode, "enc");
+  ok("envio grupo: enc pairwise (pkmsg|msg)", pwEnc?.attrs.type === "pkmsg" || pwEnc?.attrs.type === "msg");
+  const skEnc = getBinaryNodeChildren(gmsg, "enc").find((e) => e.attrs.type === "skmsg");
+  ok("envio grupo: <enc type=skmsg> com conteúdo", !!skEnc && skEnc.content instanceof Uint8Array);
+
+  // lado do usuário: processa o SKDM do bot e decifra o skmsg
+  const botToUserRec = new SenderKeyRecord();
+  const pwPlain = unpad(await decryptWhisperMessage(userDeps, "bot.0", pwEnc!.content as Uint8Array));
+  const botSkdm = decodeE2EMessage(pwPlain).senderKeyDistributionMessage;
+  ok(
+    "envio grupo: pairwise carrega o SKDM do bot",
+    !!botSkdm?.axolotlSenderKeyDistributionMessage && botSkdm.groupId === GROUP,
+  );
+  processSenderKeyDistribution(botToUserRec, botSkdm!.axolotlSenderKeyDistributionMessage!);
+  const clearG = decodeE2EMessage(unpad(groupDecrypt(C, botToUserRec, skEnc!.content as Uint8Array)));
+  ok("envio grupo: usuário decifra a resposta do bot", clearG.conversation === "resposta no grupo", JSON.stringify(clearG));
+
+  // 2ª mensagem no mesmo grupo: NÃO re-distribui o SKDM
+  sent.length = 0;
+  await layer.sendMessage(GROUP, { conversation: "segunda" });
+  const g2msg = sent.find((n) => n.tag === "message" && n.attrs.to === GROUP);
+  ok("envio grupo: 2ª msg sem <participants>", !getBinaryNodeChild(g2msg, "participants"));
+  const sk2 = getBinaryNodeChildren(g2msg, "enc").find((e) => e.attrs.type === "skmsg");
+  const clearG2 = decodeE2EMessage(unpad(groupDecrypt(C, botToUserRec, sk2!.content as Uint8Array)));
+  ok("envio grupo: usuário decifra a 2ª (mesma cadeia)", clearG2.conversation === "segunda");
 }
 
 const rt =

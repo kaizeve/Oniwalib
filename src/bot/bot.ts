@@ -21,13 +21,28 @@ export interface IncomingMessage {
   timestamp?: number;
 }
 
-/** O que um comando pode devolver: texto puro, ou um `Message` rico. */
+/** O que um comando pode devolver: texto puro, um `Message` rico, ou uma lista
+ *  deles (mandados em ordem — ex.: menu em texto + o mesmo menu em botões). */
 export type CommandReply = string | E2EMessage;
+export type CommandResult = CommandReply | CommandReply[];
 
 export type CommandHandler = (
   args: string,
   msg: IncomingMessage,
-) => CommandReply | undefined | Promise<CommandReply | undefined>;
+) => CommandResult | undefined | Promise<CommandResult | undefined>;
+
+/** `[id, rótulo, descrição]` de uma linha de menu. O `id` já vem com prefixo. */
+type MenuRow = [id: string, label: string, desc: string];
+
+const MENU_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
+
+/** "2" ou "2️⃣" → 2; qualquer outra coisa → undefined. */
+function menuIndex(text: string): number | undefined {
+  const t = text.trim();
+  if (/^[1-9]$/.test(t) || t === "10") return Number(t);
+  const e = MENU_EMOJI.indexOf(t);
+  return e >= 0 ? e + 1 : undefined;
+}
 
 export interface OniBotOptions {
   /** Prefixo dos comandos. Default `!`. */
@@ -42,6 +57,9 @@ export class OniBot {
   private commands = new Map<string, { handler: CommandHandler; help: string }>();
   private monitor = new Monitor();
   private startedAt = Date.now();
+  /** Comandos (sem prefixo) do último menu mostrado em cada chat — a resposta
+   *  "2" cai no comando da 2ª linha. */
+  private lastMenu = new Map<string, string[]>();
 
   constructor(opts: OniBotOptions = {}) {
     this.prefix = opts.prefix ?? "!";
@@ -56,16 +74,30 @@ export class OniBot {
   }
 
   /** Processa uma mensagem. Devolve a resposta, ou `undefined` se não for comando. */
-  async handle(msg: IncomingMessage): Promise<CommandReply | undefined> {
+  async handle(msg: IncomingMessage): Promise<CommandResult | undefined> {
     const text = msg.text.trim();
+
+    // Resposta a um menu de texto ("2" / "2️⃣") → o comando daquela linha.
+    const pick = menuIndex(text);
+    if (pick !== undefined) {
+      const cmd = this.lastMenu.get(msg.from)?.[pick - 1];
+      if (cmd) return this.dispatch(cmd, "", msg);
+    }
+
     if (!text.startsWith(this.prefix)) return undefined;
     const sp = text.indexOf(" ");
     const cmd = (sp < 0 ? text.slice(this.prefix.length) : text.slice(this.prefix.length, sp)).toLowerCase();
     const args = sp < 0 ? "" : text.slice(sp + 1).trim();
+    return this.dispatch(cmd, args, msg);
+  }
+
+  private async dispatch(
+    cmd: string,
+    args: string,
+    msg: IncomingMessage,
+  ): Promise<CommandResult | undefined> {
     const entry = this.commands.get(cmd);
-    if (!entry) {
-      return `comando desconhecido: ${cmd}. tente ${this.prefix}help`;
-    }
+    if (!entry) return `comando desconhecido: ${cmd}. tente ${this.prefix}help`;
     return entry.handler(args, msg);
   }
 
@@ -125,43 +157,41 @@ export class OniBot {
       return "```\n" + table + "\n```";
     });
 
-    this.register("buttons", "3 botões de resposta rápida (buttonsMessage)", () => ({
-      buttonsMessage: {
-        contentText: `*${this.name}* · toque um botão`,
-        footerText: "oniwalib",
-        headerType: 1,
-        buttons: [
-          { buttonId: `${this.prefix}ping`, buttonText: { displayText: "🏓 ping" }, type: 1 },
-          { buttonId: `${this.prefix}status`, buttonText: { displayText: "📊 status" }, type: 1 },
-          { buttonId: `${this.prefix}table`, buttonText: { displayText: "📋 table" }, type: 1 },
-        ],
-      },
-    }));
+    // buttonsMessage/listMessage legados o WhatsApp não renderiza mais de cliente
+    // não-oficial, e o native flow (interactiveMessage) some inteiro em muitas
+    // contas. Então mandamos SEMPRE dois: (1) o menu em texto puro — renderiza
+    // em qualquer cliente, e a resposta "2" roda o comando da 2ª linha; (2) o
+    // mesmo menu como botões, pra contas/versões onde ainda desenha.
+    const diagRows: MenuRow[] = [
+      [`${this.prefix}ping`, "🏓 ping", "latência"],
+      [`${this.prefix}status`, "📊 status", "cpu / ram / uptime"],
+      [`${this.prefix}table`, "📋 table", "stats em tabela"],
+    ];
 
-    const listReply = (): E2EMessage => ({
-      listMessage: {
-        title: `menu do ${this.name}`,
-        description: "escolha um comando para rodar",
-        buttonText: "abrir menu",
-        footerText: "oniwalib",
-        listType: 1,
-        sections: [
-          {
-            title: "diagnóstico",
-            rows: [
-              { title: "🏓 ping", description: "latência", rowId: `${this.prefix}ping` },
-              { title: "📊 status", description: "cpu / ram / uptime", rowId: `${this.prefix}status` },
-              { title: "📋 table", description: "stats em tabela", rowId: `${this.prefix}table` },
-            ],
-          },
-          {
-            title: "outros",
-            rows: [{ title: "⏱️ uptime", description: "tempo no ar", rowId: `${this.prefix}uptime` }],
-          },
-        ],
-      },
+    this.register("buttons", "menu de comandos (botões + texto)", (_args, msg) => {
+      this.rememberMenu(msg, diagRows);
+      return [
+        this.textMenu(`*${this.name}* · escolha um comando`, diagRows),
+        this.quickReplies(
+          `*${this.name}* · toque um botão`,
+          diagRows.map(([id, label]) => [label, id]),
+        ),
+      ];
     });
-    this.register("list", "menu selecionável (listMessage)", listReply);
+
+    const listSections: Array<{ title: string; rows: MenuRow[] }> = [
+      { title: "diagnóstico", rows: diagRows },
+      { title: "outros", rows: [[`${this.prefix}uptime`, "⏱️ uptime", "tempo no ar"]] },
+    ];
+    const listReply: CommandHandler = (_args, msg) => {
+      const flat = listSections.reduce<MenuRow[]>((acc, s) => acc.concat(s.rows), []);
+      this.rememberMenu(msg, flat);
+      return [
+        this.textMenu(`menu do ${this.name} — escolha um comando`, flat),
+        this.singleSelect(`menu do ${this.name}`, "abrir menu", listSections),
+      ];
+    };
+    this.register("list", "menu selecionável (lista + texto)", listReply);
     this.register("menu", "alias de !list", listReply);
 
     this.register("help", "esta lista", () => {
@@ -170,6 +200,80 @@ export class OniBot {
         .map(([n, e]) => `${this.prefix}${n} — ${e.help}`);
       return `comandos de *${this.name}*:\n` + lines.join("\n");
     });
+  }
+
+  // O WhatsApp parou de desenhar `buttonsMessage`/`listMessage` legados vindos
+  // de cliente não-oficial. O caminho que ainda renderiza é `interactiveMessage`
+  // + `nativeFlowMessage`, embrulhado em `viewOnceMessage` com um
+  // `messageContextInfo` (deviceListMetadataVersion 2). O toque volta como
+  // `interactiveResponseMessage` e o `messageText` do codec extrai o `id`
+  // — que a gente põe como `!comando`, então cai no mesmo handler do texto.
+  private interactiveViewOnce(body: string, buttons: Array<{ name: string; params: unknown }>): E2EMessage {
+    return {
+      viewOnceMessage: {
+        message: {
+          messageContextInfo: { deviceListMetadataVersion: 2 },
+          interactiveMessage: {
+            body: { text: body },
+            footer: { text: "oniwalib" },
+            nativeFlowMessage: {
+              buttons: buttons.map((b) => ({
+                name: b.name,
+                buttonParamsJson: JSON.stringify(b.params),
+              })),
+            },
+          },
+        },
+      },
+    };
+  }
+
+  /** N botões de resposta rápida. `buttons` = `[rótulo, id]`. */
+  private quickReplies(body: string, buttons: Array<[label: string, id: string]>): E2EMessage {
+    return this.interactiveViewOnce(
+      body,
+      buttons.map(([display_text, id]) => ({
+        name: "quick_reply",
+        params: { display_text, id },
+      })),
+    );
+  }
+
+  /** Menu de seleção única. `sections[].rows` = `[id, título, descrição]`. */
+  private singleSelect(
+    body: string,
+    buttonLabel: string,
+    sections: Array<{ title: string; rows: Array<[id: string, title: string, description: string]> }>,
+  ): E2EMessage {
+    return this.interactiveViewOnce(body, [
+      {
+        name: "single_select",
+        params: {
+          title: buttonLabel,
+          sections: sections.map((s) => ({
+            title: s.title,
+            rows: s.rows.map(([id, title, description]) => ({ header: "", title, description, id })),
+          })),
+        },
+      },
+    ]);
+  }
+
+  /** Menu numerado em texto puro — renderiza em qualquer cliente. */
+  private textMenu(header: string, rows: MenuRow[]): string {
+    const body = rows
+      .map(([id, , desc], i) => `${MENU_EMOJI[i] ?? `${i + 1}.`}  ${id} — ${desc}`)
+      .join("\n");
+    return `${header}\n\n${body}\n\nresponda com o número ou digite o comando`;
+  }
+
+  /** Guarda os comandos (sem prefixo) do último menu mostrado nesse chat. */
+  private rememberMenu(msg: IncomingMessage, rows: MenuRow[]): void {
+    if (this.lastMenu.size > 500) this.lastMenu.clear(); // teto simples
+    this.lastMenu.set(
+      msg.from,
+      rows.map(([id]) => id.slice(this.prefix.length)),
+    );
   }
 }
 

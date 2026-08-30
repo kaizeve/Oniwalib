@@ -15,10 +15,15 @@
 // GRUPOS (LEITURA): a stanza de grupo traz dois <enc> — um pairwise
 // (pkmsg/msg) com o `SenderKeyDistributionMessage` que inicia/roda a cadeia do
 // remetente, e um `skmsg` com o conteúdo. Processamos o primeiro, guardamos o
-// `SenderKeyRecord` e deciframos o segundo. RESPONDER em grupo (criar o nosso
-// sender key + distribuir via USync/cold-send) continua sendo fase 2.
+// `SenderKeyRecord` e deciframos o segundo.
 //
-// O que a fase 1 ainda NÃO faz: enviar em grupo, retry receipts, USync, mídia.
+// GRUPOS (ESCRITA): `sendMessage` num jid `@g.us` cria o NOSSO sender key,
+// cifra o conteúdo em `skmsg`, e distribui o SKDM 1:1 para cada participante
+// com quem já temos sessão pairwise (os que mandaram o SKDM deles). Sem USync
+// nem metadata do grupo — quem nunca falou no grupo desde que o bot conectou
+// não recebe o nosso sender key até (re)aparecer.
+//
+// O que ainda NÃO faz: USync/cold-send (bundle de quem nunca falou), mídia.
 
 import type { Emitter } from "./events/emitter";
 import type { AuthenticationState } from "./auth/state";
@@ -39,6 +44,8 @@ import {
   SenderKeyRecord,
   processSenderKeyDistribution,
   groupDecrypt,
+  createSenderKeyDistribution,
+  groupEncrypt,
 } from "./signal/sender-key";
 import {
   decodeE2EMessage,
@@ -90,6 +97,46 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     chain = run.catch(() => {});
     return run;
   };
+
+  // Participantes de grupo com quem temos sessão pairwise — para eles a gente
+  // consegue distribuir o NOSSO sender key ao responder no grupo. Cache em
+  // memória (grupo -> addr -> jid); a fonte durável é `sender-key-memory`, que
+  // guarda por grupo um mapa jid -> "já tem o nosso SKDM atual?" (à la Baileys).
+  const groupPeers = new Map<string, Map<string, string>>();
+
+  type PeerMem = Record<string, boolean>;
+  const loadPeerMem = async (groupId: string): Promise<PeerMem> => {
+    const { [groupId]: raw } = await auth.keys.get("sender-key-memory", [groupId]);
+    return (raw as PeerMem) ?? {};
+  };
+  const savePeerMem = (groupId: string, mem: PeerMem): Promise<void> =>
+    auth.keys.set({ "sender-key-memory": { [groupId]: mem } });
+
+  // Registra `jid` como participante alcançável de `groupId` — só se de fato há
+  // sessão pairwise (senão não dá pra mandar o SKDM). Persiste com flag `false`
+  // (= conhecido, ainda sem o nosso SKDM).
+  async function rememberGroupPeer(groupId: string, jid: string): Promise<void> {
+    let addr: string;
+    try {
+      addr = signalAddress(jid);
+    } catch {
+      return; // jid sem user (server, etc.)
+    }
+    const sess = await deps.storage.loadSession(addr);
+    if (!sess || !sess.getOpenSession()) return;
+    let m = groupPeers.get(groupId);
+    if (!m) {
+      m = new Map();
+      groupPeers.set(groupId, m);
+    }
+    if (m.get(addr) === jid) return;
+    m.set(addr, jid);
+    const mem = await loadPeerMem(groupId);
+    if (!(jid in mem)) {
+      mem[jid] = false;
+      await savePeerMem(groupId, mem);
+    }
+  }
 
   const meUser = () => jidDecode(auth.creds.me?.id)?.user;
   const sameUser = (a?: string, b?: string) => {
@@ -284,7 +331,11 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
         !msg.buttonsMessage &&
         !msg.listMessage &&
         !msg.buttonsResponseMessage &&
-        !msg.listResponseMessage;
+        !msg.listResponseMessage &&
+        !msg.interactiveMessage &&
+        !msg.interactiveResponseMessage &&
+        !msg.templateButtonReplyMessage &&
+        !msg.reactionMessage;
       if (!bareSkdm) {
         events.emit("messages.upsert", {
           type: "notify",
@@ -306,6 +357,9 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
       const rec = await loadSenderKey(name);
       processSenderKeyDistribution(rec, skdm.axolotlSenderKeyDistributionMessage);
       await storeSenderKey(name, rec);
+      // Temos sessão pairwise com quem mandou este SKDM → ele entra na lista de
+      // quem recebe o NOSSO sender key quando formos responder no grupo.
+      await rememberGroupPeer(groupId, author);
     };
 
     // Uma stanza por vez: os ratchets mutam estado e não são reentrantes.
@@ -320,6 +374,9 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
             const plain = unpad(groupDecrypt(c, rec, body));
             await storeSenderKey(skName, rec);
             deliver(plain);
+            // Lemos este participante → se já temos sessão pairwise com ele,
+            // registra como alcançável (sobrevive ao restart via store).
+            await rememberGroupPeer(from, author);
             return;
           }
 
@@ -366,6 +423,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
   }
 
   async function sendMessage(jid: string, msg: E2EMessage): Promise<{ id: string }> {
+    if (isJidGroup(jid)) return sendGroupMessage(jid, msg);
     return serial(async () => {
       const addr = signalAddress(jid);
       const existing = await deps.storage.loadSession(addr);
@@ -393,6 +451,93 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
 
       const id = genId();
       sendNode(node("message", { id, to: jid, type: "text" }, content));
+      return { id };
+    });
+  }
+
+  // Responder num GRUPO. Sem USync/metadata do grupo (fase 3): distribui o
+  // nosso sender key só para os participantes com quem já temos sessão pairwise
+  // (os que mandaram o SKDM deles). Estrutura da stanza espelha a Baileys:
+  //   <message to="G@g.us" type="text">
+  //     <participants><to jid=D><enc pkmsg|msg>{SKDM}</enc></to>…</participants>
+  //     <enc type="skmsg">{groupEncrypt(conteúdo)}</enc>
+  //     <device-identity/>            (só se algum <enc> foi pkmsg)
+  //   </message>
+  // Quem ainda não recebeu o nosso SKDM não decifra até (re)aparecer — mesma
+  // limitação que a leitura de grupo tem hoje.
+  async function sendGroupMessage(groupJid: string, msg: E2EMessage): Promise<{ id: string }> {
+    return serial(async () => {
+      const meId = auth.creds.me?.id;
+      if (!meId) throw new Error("sendGroupMessage: sem creds.me");
+      const recName = `${groupJid}::${signalAddress(meId)}`;
+      const rec = await loadSenderKey(recName);
+      const skdm = createSenderKeyDistribution(c, rec); // idempotente
+      const skCipher = groupEncrypt(c, rec, pad(encodeE2EMessage(msg)));
+      await storeSenderKey(recName, rec);
+
+      // Candidatos = cache em memória ∪ o que está no store durável.
+      const mem = await loadPeerMem(groupJid);
+      const candidates = new Map<string, string>(); // addr -> jid
+      for (const [a2, j2] of groupPeers.get(groupJid) ?? []) candidates.set(a2, j2);
+      for (const j2 of Object.keys(mem)) {
+        try {
+          candidates.set(signalAddress(j2), j2);
+        } catch {
+          /* jid estranho no store — ignora */
+        }
+      }
+
+      const skdmPlain = pad(
+        encodeE2EMessage({
+          senderKeyDistributionMessage: {
+            groupId: groupJid,
+            axolotlSenderKeyDistributionMessage: skdm,
+          },
+        }),
+      );
+
+      const toNodes: BinaryNode[] = [];
+      let anyPkmsg = false;
+      let addressingMode: string | undefined;
+      for (const [addr, jid] of candidates) {
+        if (jid.endsWith("@lid")) addressingMode = "lid";
+        if (mem[jid] === true) continue; // já tem o nosso SKDM atual
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const { type, body } = await signalEncrypt(deps, addr, skdmPlain);
+          toNodes.push(
+            node("to", { jid }, [node("enc", { v: "2", type: type === 3 ? "pkmsg" : "msg" }, body)]),
+          );
+          if (type === 3) anyPkmsg = true;
+          mem[jid] = true;
+        } catch {
+          /* sem sessão com esse device — não dá pra distribuir agora */
+        }
+      }
+      await savePeerMem(groupJid, mem);
+      // eslint-disable-next-line no-console
+      console.log(
+        `messages: grupo ${groupJid} — SKDM p/ ${toNodes.length} device(s), ` +
+          `${candidates.size} conhecido(s)`,
+      );
+
+      const content: BinaryNode[] = [];
+      if (toNodes.length) content.push(node("participants", {}, toNodes));
+      content.push(node("enc", { v: "2", type: "skmsg" }, skCipher));
+      if (anyPkmsg && auth.creds.account) {
+        content.push(
+          node(
+            "device-identity",
+            {},
+            encodeSignedDeviceIdentity(auth.creds.account as ADVSignedDeviceIdentity, true),
+          ),
+        );
+      }
+
+      const id = genId();
+      const attrs: Record<string, string> = { id, to: groupJid, type: "text" };
+      if (addressingMode) attrs.addressing_mode = addressingMode;
+      sendNode(node("message", attrs, content));
       return { id };
     });
   }

@@ -144,6 +144,78 @@ ok("conversation vira 0a026f69", hex(encodeE2EMessage({ conversation: "oi" })) =
   ok("messageText de escolha em lista = rowId", messageText(lr) === "!status");
 }
 
+// interactiveMessage (campo 45) + nativeFlowMessage — round-trip
+{
+  const msg = {
+    viewOnceMessage: {
+      message: {
+        messageContextInfo: { deviceListMetadataVersion: 2 },
+        interactiveMessage: {
+          body: { text: "toque um botão" },
+          footer: { text: "oni" },
+          nativeFlowMessage: {
+            buttons: [
+              { name: "quick_reply", buttonParamsJson: '{"display_text":"🏓 ping","id":"!ping"}' },
+              { name: "quick_reply", buttonParamsJson: '{"display_text":"📊 status","id":"!status"}' },
+            ],
+          },
+        },
+      },
+    },
+  };
+  const back = decodeE2EMessage(encodeE2EMessage(msg));
+  const im = back.viewOnceMessage?.message?.interactiveMessage;
+  ok("interactiveMessage.body round-trip", im?.body?.text === "toque um botão");
+  ok("interactiveMessage.footer round-trip", im?.footer?.text === "oni");
+  ok("nativeFlowMessage: 2 botões", im?.nativeFlowMessage?.buttons?.length === 2);
+  ok("nativeFlow botão name", im?.nativeFlowMessage?.buttons?.[0]?.name === "quick_reply");
+  ok(
+    "nativeFlow botão params",
+    im?.nativeFlowMessage?.buttons?.[1]?.buttonParamsJson === '{"display_text":"📊 status","id":"!status"}',
+  );
+  ok(
+    "messageContextInfo.deviceListMetadataVersion",
+    back.viewOnceMessage?.message?.messageContextInfo?.deviceListMetadataVersion === 2,
+  );
+}
+
+// toque em native flow → interactiveResponseMessage (campo 48) → messageText = id
+{
+  const resp = decodeE2EMessage(
+    encodeE2EMessage({
+      interactiveResponseMessage: {
+        body: { text: "🏓 ping" },
+        nativeFlowResponseMessage: {
+          name: "quick_reply",
+          paramsJson: '{"id":"!ping","display_text":"🏓 ping"}',
+        },
+      },
+    }),
+  );
+  ok(
+    "interactiveResponseMessage.nativeFlowResponseMessage.name",
+    resp.interactiveResponseMessage?.nativeFlowResponseMessage?.name === "quick_reply",
+  );
+  ok("messageText de toque em native flow = id", messageText(resp) === "!ping");
+
+  // quick_reply às vezes volta como templateButtonReplyMessage (campo 29)
+  const tbr = decodeE2EMessage(
+    encodeE2EMessage({ templateButtonReplyMessage: { selectedId: "!status", selectedDisplayText: "📊" } }),
+  );
+  ok("templateButtonReplyMessage.selectedId", tbr.templateButtonReplyMessage?.selectedId === "!status");
+  ok("messageText de templateButtonReply = id", messageText(tbr) === "!status");
+}
+
+// reactionMessage: campo 46 no fio (não 25 = templateMessage)
+{
+  const enc = encodeE2EMessage({
+    reactionMessage: { key: { id: "x", remoteJid: "a@s.whatsapp.net", fromMe: false }, text: "🔥" },
+  });
+  ok("reactionMessage usa o campo 46", new Reader(enc).next().field === 46);
+  const back = decodeE2EMessage(enc);
+  ok("reactionMessage round-trip", back.reactionMessage?.text === "🔥");
+}
+
 const rt =
   typeof (globalThis as any).Bun !== "undefined"
     ? "bun"

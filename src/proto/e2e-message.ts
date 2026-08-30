@@ -14,8 +14,12 @@
 //     ListResponseMessage listResponseMessage                   = 39;
 //     ButtonsMessage buttonsMessage                             = 42;
 //     ButtonsResponseMessage buttonsResponseMessage             = 43;
+//     InteractiveMessage interactiveMessage                     = 45;  // native flow — o caminho vivo p/ botões
+//     ReactionMessage reactionMessage                           = 46;
+//     InteractiveResponseMessage interactiveResponseMessage     = 48;  // volta quando toca num native-flow
+//     TemplateButtonReplyMessage templateButtonReplyMessage     = 29;  // volta quando toca num quick_reply
 //     DeviceSentMessage deviceSentMessage                       = 31;  // { string destinationJid = 1; Message message = 2; }
-//     MessageContextInfo messageContextInfo                     = 35;  // ignorado
+//     MessageContextInfo messageContextInfo                     = 35;  // { DeviceListMetadata = 1; int32 version = 2 }
 //   }
 //
 // Campos conferidos contra `@whiskeysockets/baileys` WAProto (master, 2026-08).
@@ -76,6 +80,25 @@ export interface E2EProtocolMessage {
   type?: number;
 }
 
+/**
+ * InteractiveMessage (campo 45) + NativeFlowMessage. É o caminho que os forks
+ * usam depois que o WhatsApp parou de desenhar `buttonsMessage`/`listMessage`
+ * legados vindos de cliente não-oficial. Os botões viram entradas de
+ * `nativeFlowMessage.buttons` com `name` (`quick_reply`, `cta_url`,
+ * `single_select`, …) e `buttonParamsJson` (JSON serializado). O toque volta em
+ * `interactiveResponseMessage` ou `templateButtonReplyMessage`.
+ */
+export interface E2EInteractiveMessage {
+  header?: { title?: string; subtitle?: string; hasMediaAttachment?: boolean };
+  body?: { text?: string };
+  footer?: { text?: string };
+  nativeFlowMessage?: {
+    buttons?: Array<{ name?: string; buttonParamsJson?: string }>;
+    messageParamsJson?: string;
+    messageVersion?: number;
+  };
+}
+
 export interface E2EMessage {
   conversation?: string;
   extendedTextMessage?: { text?: string };
@@ -92,6 +115,18 @@ export interface E2EMessage {
     title?: string;
     description?: string;
     singleSelectReply?: { selectedRowId?: string };
+  };
+  /** Resposta a um `quick_reply` de template/native-flow. */
+  templateButtonReplyMessage?: {
+    selectedId?: string;
+    selectedDisplayText?: string;
+    selectedIndex?: number;
+  };
+  messageContextInfo?: { deviceListMetadataVersion?: number; messageSecret?: Uint8Array };
+  interactiveMessage?: E2EInteractiveMessage;
+  interactiveResponseMessage?: {
+    body?: { text?: string };
+    nativeFlowResponseMessage?: { name?: string; paramsJson?: string; version?: number };
   };
   reactionMessage?: E2EReactionMessage;
   protocolMessage?: E2EProtocolMessage;
@@ -121,6 +156,64 @@ function decodeMessageKey(b: Uint8Array | undefined): E2EMessageKey | undefined 
     id: asStr(f.get(3)?.[0]),
     participant: asStr(f.get(4)?.[0]),
   };
+}
+
+//   message InteractiveMessage {
+//     Header header = 1; Body body = 2; Footer footer = 3;
+//     NativeFlowMessage nativeFlowMessage = 6;   // { NativeFlowButton buttons = 1; string messageParamsJson = 2; int32 messageVersion = 3 }
+//   }
+function interactiveWriter(im: E2EInteractiveMessage): Writer {
+  const w = new Writer();
+  if (im.header) {
+    const h = new Writer().string(1, im.header.title).string(2, im.header.subtitle);
+    if (im.header.hasMediaAttachment) h.bool(5, true);
+    w.message(1, h);
+  }
+  if (im.body) w.message(2, new Writer().string(1, im.body.text));
+  if (im.footer) w.message(3, new Writer().string(1, im.footer.text));
+  const nf = im.nativeFlowMessage;
+  if (nf) {
+    const nfw = new Writer();
+    for (const b of nf.buttons ?? []) {
+      nfw.message(1, new Writer().string(1, b.name).string(2, b.buttonParamsJson));
+    }
+    nfw.string(2, nf.messageParamsJson);
+    if (nf.messageVersion) nfw.uint(3, nf.messageVersion);
+    w.message(6, nfw);
+  }
+  return w;
+}
+
+function decodeInteractive(bytes: Uint8Array): E2EInteractiveMessage {
+  const f = new Reader(bytes).fields();
+  const out: E2EInteractiveMessage = {};
+  const h = asBytes(f.get(1)?.[0]);
+  if (h) {
+    const hf = new Reader(h).fields();
+    out.header = {
+      title: asStr(hf.get(1)?.[0]),
+      subtitle: asStr(hf.get(2)?.[0]),
+      hasMediaAttachment: hf.get(5)?.[0] === 1,
+    };
+  }
+  const b = asBytes(f.get(2)?.[0]);
+  if (b) out.body = { text: asStr(new Reader(b).fields().get(1)?.[0]) };
+  const ft = asBytes(f.get(3)?.[0]);
+  if (ft) out.footer = { text: asStr(new Reader(ft).fields().get(1)?.[0]) };
+  const nf = asBytes(f.get(6)?.[0]);
+  if (nf) {
+    const nff = new Reader(nf).fields();
+    const ver = nff.get(3)?.[0];
+    out.nativeFlowMessage = {
+      buttons: (nff.get(1) ?? []).map((btn) => {
+        const bf = new Reader(asBytes(btn)!).fields();
+        return { name: asStr(bf.get(1)?.[0]), buttonParamsJson: asStr(bf.get(2)?.[0]) };
+      }),
+      messageParamsJson: asStr(nff.get(2)?.[0]),
+      messageVersion: typeof ver === "number" ? ver : undefined,
+    };
+  }
+  return out;
 }
 
 export function encodeE2EMessage(m: E2EMessage): Uint8Array {
@@ -189,6 +282,35 @@ export function encodeE2EMessage(m: E2EMessage): Uint8Array {
     const sub = new Writer().string(1, r.selectedButtonId).string(2, r.selectedDisplayText);
     w.message(43, sub);
   }
+  if (m.templateButtonReplyMessage) {
+    const r = m.templateButtonReplyMessage;
+    const sub = new Writer().string(1, r.selectedId).string(2, r.selectedDisplayText);
+    if (r.selectedIndex) sub.uint(4, r.selectedIndex);
+    w.message(29, sub);
+  }
+  if (m.messageContextInfo) {
+    const sub = new Writer();
+    if (m.messageContextInfo.deviceListMetadataVersion)
+      sub.uint(2, m.messageContextInfo.deviceListMetadataVersion);
+    sub.bytes(3, m.messageContextInfo.messageSecret);
+    w.message(35, sub);
+  }
+  if (m.interactiveMessage) {
+    w.message(45, interactiveWriter(m.interactiveMessage));
+  }
+  if (m.interactiveResponseMessage) {
+    const r = m.interactiveResponseMessage;
+    const sub = new Writer();
+    if (r.body) sub.message(1, new Writer().string(1, r.body.text));
+    if (r.nativeFlowResponseMessage) {
+      const nfr = new Writer()
+        .string(1, r.nativeFlowResponseMessage.name)
+        .string(2, r.nativeFlowResponseMessage.paramsJson);
+      if (r.nativeFlowResponseMessage.version) nfr.uint(3, r.nativeFlowResponseMessage.version);
+      sub.message(2, nfr);
+    }
+    w.message(48, sub);
+  }
   if (m.reactionMessage) {
     const r = m.reactionMessage;
     const sub = new Writer();
@@ -196,7 +318,7 @@ export function encodeE2EMessage(m: E2EMessage): Uint8Array {
     sub.string(2, r.text);
     sub.string(3, r.groupingKey);
     if (r.senderTimestampMs) sub.uint(4, r.senderTimestampMs);
-    w.message(25, sub);
+    w.message(46, sub);
   }
   if (m.protocolMessage) {
     const p = m.protocolMessage;
@@ -319,7 +441,56 @@ export function decodeE2EMessage(bytes: Uint8Array): E2EMessage {
     };
   }
 
-  const rm = asBytes(f.get(25)?.[0]);
+  const tbr = asBytes(f.get(29)?.[0]);
+  if (tbr) {
+    const sf = new Reader(tbr).fields();
+    const idx = sf.get(4)?.[0];
+    out.templateButtonReplyMessage = {
+      selectedId: asStr(sf.get(1)?.[0]),
+      selectedDisplayText: asStr(sf.get(2)?.[0]),
+      selectedIndex: typeof idx === "number" ? idx : undefined,
+    };
+  }
+
+  const mci = asBytes(f.get(35)?.[0]);
+  if (mci) {
+    const sf = new Reader(mci).fields();
+    const v = sf.get(2)?.[0];
+    out.messageContextInfo = {
+      deviceListMetadataVersion: typeof v === "number" ? v : undefined,
+      messageSecret: asBytes(sf.get(3)?.[0]),
+    };
+  }
+
+  const inter = asBytes(f.get(45)?.[0]);
+  if (inter) out.interactiveMessage = decodeInteractive(inter);
+
+  const iresp = asBytes(f.get(48)?.[0]);
+  if (iresp) {
+    const sf = new Reader(iresp).fields();
+    const bodyB = asBytes(sf.get(1)?.[0]);
+    const nfrB = asBytes(sf.get(2)?.[0]);
+    let nativeFlowResponseMessage: {
+      name?: string;
+      paramsJson?: string;
+      version?: number;
+    } | undefined;
+    if (nfrB) {
+      const nf = new Reader(nfrB).fields();
+      const ver = nf.get(3)?.[0];
+      nativeFlowResponseMessage = {
+        name: asStr(nf.get(1)?.[0]),
+        paramsJson: asStr(nf.get(2)?.[0]),
+        version: typeof ver === "number" ? ver : undefined,
+      };
+    }
+    out.interactiveResponseMessage = {
+      body: bodyB ? { text: asStr(new Reader(bodyB).fields().get(1)?.[0]) } : undefined,
+      nativeFlowResponseMessage,
+    };
+  }
+
+  const rm = asBytes(f.get(46)?.[0]);
   if (rm) {
     const sf = new Reader(rm).fields();
     const ts = sf.get(4)?.[0];
@@ -358,6 +529,19 @@ export function messageText(m: E2EMessage | undefined): string {
   if (m.listResponseMessage?.singleSelectReply?.selectedRowId) {
     return m.listResponseMessage.singleSelectReply.selectedRowId;
   }
+  if (m.templateButtonReplyMessage?.selectedId) return m.templateButtonReplyMessage.selectedId;
+  // native flow: o toque volta com `paramsJson` = { id, display_text }. O `id`
+  // é o que a gente pôs no botão (ex.: "!ping"), então é o que roteia.
+  const nfr = m.interactiveResponseMessage?.nativeFlowResponseMessage;
+  if (nfr?.paramsJson) {
+    try {
+      const p = JSON.parse(nfr.paramsJson) as { id?: unknown };
+      if (typeof p.id === "string" && p.id) return p.id;
+    } catch {
+      /* paramsJson não-JSON — cai no fallback */
+    }
+  }
   if (m.viewOnceMessage?.message) return messageText(m.viewOnceMessage.message);
+  if (m.interactiveResponseMessage?.body?.text) return m.interactiveResponseMessage.body.text;
   return "";
 }
