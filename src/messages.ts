@@ -126,35 +126,83 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     }
   };
 
-  // Falhou ao decifrar → pede pro remetente reenviar. É o mínimo (só
-  // `<registration>`); o bloco `<keys>` com identidade + pré-chave nova (para o
-  // remetente reabrir a sessão pairwise) é o próximo passo. Sem isso, um `skmsg`
-  // de uma distribuição anterior (SKDM que nunca chegou) fica ilegível.
+  const be = (n: number, len: number): Uint8Array => {
+    const out = new Uint8Array(len);
+    let r = n;
+    for (let i = len - 1; i >= 0; i--) {
+      out[i] = r & 0xff;
+      r = Math.floor(r / 256);
+    }
+    return out;
+  };
+
+  // Uma pré-chave nova, avulsa (não entra no `<list>` de upload) — vai no
+  // `<keys>` do retry para o remetente reabrir a sessão pairwise.
+  async function mintRetryPreKey(): Promise<{ id: number; pub: Uint8Array }> {
+    const id = auth.creds.nextPreKeyId;
+    const kp = c.generateX25519();
+    await auth.keys.set({
+      "pre-key": { [String(id)]: { public: kp.publicKey, private: kp.privateKey } },
+    });
+    auth.creds.nextPreKeyId = id + 1;
+    auth.creds.firstUnuploadedPreKeyId = Math.max(auth.creds.firstUnuploadedPreKeyId, id + 1);
+    await opts.saveCreds?.();
+    return { id, pub: kp.publicKey };
+  }
+
+  // Falhou ao decifrar → pede pro remetente reenviar. Leva `<registration>` e o
+  // bloco `<keys>` (tipo, identidade, uma pré-chave nova, a signed pre-key e a
+  // device-identity) — é o que o remetente precisa para reabrir a sessão
+  // pairwise e reenviar, inclusive o SKDM de uma distribuição de grupo que a
+  // gente nunca recebeu. Espelha `sendRetryRequest` da Baileys.
   const retryCounts = new Map<string, number>();
-  const sendRetryReceipt = (stanza: BinaryNode) => {
+  const KEY_BUNDLE_TYPE = Uint8Array.from([5]);
+  const sendRetryReceipt = async (stanza: BinaryNode): Promise<void> => {
     const a = stanza.attrs;
     if (!a.id || !a.from) return;
     const count = (retryCounts.get(a.id) ?? 0) + 1;
     if (count > 5) return;
     retryCounts.set(a.id, count);
+
     const attrs: Record<string, string> = { id: a.id, type: "retry", to: a.from };
     if (a.participant) attrs.participant = a.participant;
-    const be = (n: number, len: number) => {
-      const out = new Uint8Array(len);
-      let r = n;
-      for (let i = len - 1; i >= 0; i--) {
-        out[i] = r & 0xff;
-        r = Math.floor(r / 256);
-      }
-      return out;
-    };
+    if (a.recipient) attrs.recipient = a.recipient;
+
+    const content: BinaryNode[] = [
+      node("retry", { count: String(count), id: a.id, t: a.t ?? "0", v: "1" }),
+      node("registration", {}, be(auth.creds.registrationId, 4)),
+    ];
+
     try {
-      sendNode(
-        node("receipt", attrs, [
-          node("retry", { count: String(count), id: a.id, t: a.t ?? "0", v: "1" }),
-          node("registration", {}, be(auth.creds.registrationId, 4)),
+      const pk = await mintRetryPreKey();
+      const sp = auth.creds.signedPreKey;
+      const keysChildren: BinaryNode[] = [
+        node("type", {}, KEY_BUNDLE_TYPE),
+        node("identity", {}, auth.creds.signedIdentityKey.publicKey),
+        node("key", {}, [node("id", {}, be(pk.id, 3)), node("value", {}, pk.pub)]),
+        node("skey", {}, [
+          node("id", {}, be(sp.keyId, 3)),
+          node("value", {}, sp.keyPair.publicKey),
+          node("signature", {}, sp.signature),
         ]),
-      );
+      ];
+      if (auth.creds.account) {
+        keysChildren.push(
+          node(
+            "device-identity",
+            {},
+            encodeSignedDeviceIdentity(auth.creds.account as ADVSignedDeviceIdentity, true),
+          ),
+        );
+      }
+      content.push(node("keys", {}, keysChildren));
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error("messages: não consegui montar <keys> do retry:", (e as Error).message);
+    }
+
+    try {
+      sendNode(node("receipt", attrs, content));
     } catch {
       /* conexão caiu — ignora */
     }
@@ -257,7 +305,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
           console.error(
             `messages: falha ao decifrar <enc type=${type}> de ${author}: ${(err as Error).message}`,
           );
-          sendRetryReceipt(stanza);
+          await sendRetryReceipt(stanza);
         }
       });
     }

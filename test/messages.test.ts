@@ -156,6 +156,39 @@ await layer.sendMessage(USER_JID, {
   ok("sendText sem sessão lança", threw.includes("sem sessão"), threw);
 }
 
+// --- skmsg de grupo sem estado → retry receipt com <keys> ---
+sent.length = 0;
+{
+  const GROUP = "12345-67890@g.us";
+  const SENDER = "5511777777777@s.whatsapp.net";
+  const junk = new Uint8Array(80);
+  junk.fill(9);
+  junk[0] = 0x33; // byte de versão plausível
+  const stanza = node(
+    "message",
+    { from: GROUP, participant: SENDER, id: "g1", t: "1700000001" },
+    [node("enc", { v: "2", type: "skmsg" }, junk)],
+  );
+  const nextPk = botAuth.creds.nextPreKeyId;
+  await layer.handleMessageStanza(stanza);
+
+  const receipt = sent.find((n) => n.tag === "receipt" && n.attrs.type === "retry");
+  ok("mandou <receipt type=retry>", !!receipt);
+  ok("retry: to = grupo, participant = remetente", receipt?.attrs.to === GROUP && receipt?.attrs.participant === SENDER);
+  const retry = getBinaryNodeChild(receipt, "retry");
+  ok("retry: count=1", retry?.attrs.count === "1");
+  const keys = getBinaryNodeChild(receipt, "keys");
+  ok("retry: tem <keys>", !!keys);
+  ok("retry: <keys> traz type/identity/key/skey", ["type", "identity", "key", "skey"].every((t) => !!getBinaryNodeChild(keys, t)));
+  ok("retry: consumiu uma pré-chave nova", botAuth.creds.nextPreKeyId === nextPk + 1);
+
+  // segundo retry do mesmo id → count sobe
+  sent.length = 0;
+  await layer.handleMessageStanza(stanza);
+  const r2 = getBinaryNodeChild(sent.find((n) => n.tag === "receipt" && n.attrs.type === "retry"), "retry");
+  ok("retry: count=2 no reenvio", r2?.attrs.count === "2");
+}
+
 const rt =
   typeof (globalThis as any).Bun !== "undefined"
     ? "bun"
