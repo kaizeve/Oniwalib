@@ -94,29 +94,33 @@ primitivos de criptografia que o motor ainda não expõe.
 | Módulo | O que faz | bun/node | RTS |
 |---|---|:---:|:---:|
 | `frame/` | codec WABinary: binary node, buffers, JID, tabelas de token | ✅ | ✅ |
-| `noise/` | handshake XX + enquadramento — **lógica** | ✅ | ✅ |
-| `crypto/` | interface + adapter `node:crypto` de referência | ✅ | ⚠️ parcial |
+| `noise/` | handshake XX + enquadramento | ✅ | ✅ |
+| `crypto/` | interface + adapter `node:crypto` (bun/node) e adapter RTS | ✅ | ✅ |
 | `proto/` | builders de mensagem (incl. botões/list/interactive) + shapes de handshake | ✅ | ✅ |
-| `auth/` | credenciais + cofre de chaves Signal | ✅ | ⚠️ parcial |
+| `auth/` | credenciais + cofre de chaves Signal | ✅ | ✅¹ |
 | `events/` | superfície de eventos tipada | ✅ | ✅ |
 | `profiles/` | camada original vs modificada | ✅ | ✅ |
 | `transport/` | TLS + WebSocket cliente | ⛔ | ⛔ |
 
+<sub>¹ A assinatura de identidade (XEdDSA) ainda não existe no RTS — no motor,
+a `signedPreKey` fica com assinatura placeholder até a Fase 2. Todo o resto
+roda nativo.</sub>
+
 **Testes:** `wabinary` 23 · `noise` 12 (handshake XX completo, ponta a ponta) ·
-`auth` 22. Todos passam em bun. `wabinary` passa no RTS; `noise` e `auth`
-esbarram na Fase 0.
+`auth` 22 → **57/57 em bun E no RTS** (`rts run`). O handshake Noise inteiro
+executa no motor do RTS.
 
-### A Fase 0 — o que falta no RTS
+### A Fase 0 — estado no motor do RTS
 
-Nada conecta enquanto o motor do RTS não expuser:
-
-| Primitivo | API Node equivalente | Crate já aprovada (crates.md) |
+| Primitivo | API | Estado no RTS |
 |---|---|---|
-| AES-256-GCM e AES-256-CBC | `crypto.createCipheriv` / `createDecipheriv` | `aes-gcm`, `aes` + `cbc` (§4.2) |
-| ECDH X25519 | `crypto.diffieHellman` / `generateKeyPair('x25519')` | `x25519-dalek`, `curve25519-dalek` (§4.3) |
-| Assinatura Curve25519 | `crypto.sign` / `verify` (Ed25519) | `ed25519-dalek` (§4.3) |
+| SHA-256, HMAC-SHA256, HKDF, `randomBytes` | `node:crypto` | ✅ já existia |
+| AES-128/256-GCM e -CBC | `createCipheriv` / `createDecipheriv` (com `setAAD`/`getAuthTag`/`setAuthTag`) | ✅ adicionado |
+| ECDH X25519 | `generateX25519KeyPair` / `x25519PublicKey` / `x25519DiffieHellman` (bytes crus, sem KeyObject) | ✅ adicionado |
+| Assinatura Curve25519 (XEdDSA) | — | ⛔ pendente (Fase 2) |
 
-Já presentes e usados: SHA-256, HMAC-SHA256, HKDF, `randomBytes`.
+Com isso, o handshake Noise e a inicialização de credenciais rodam no motor.
+Falta a camada de transporte (TLS + WebSocket cliente) para conectar de fato.
 
 ---
 
