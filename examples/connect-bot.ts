@@ -68,28 +68,43 @@ const conn = openWhatsApp({
 // `audioMessage`. Sem botões — responde ping + uso de memória no lugar.
 const NETHER_KEY = process.env.NETHER_KEY ?? "mefodemegumi";
 const NETHER_API = process.env.NETHER_API ?? "https://api.netherhost.com.br/api";
+// Áudio a partir de uma URL do YouTube → responde os bytes do mp3 (audio/mpeg).
 const ytAudioUrl = (url: string) =>
   `${NETHER_API}/dl/ytaudio2?url=${encodeURIComponent(url)}&apikey=${NETHER_KEY}`;
-// Endpoint de busca — ajuste o path se a sua API usar outro.
+// Busca por nome → { status, resultado: [ { url, title, author, seconds, … } ] }.
 const ytSearchUrl = (q: string) =>
-  `${NETHER_API}/pesquisas/youtube?query=${encodeURIComponent(q)}&apikey=${NETHER_KEY}`;
+  `${NETHER_API}/ytsrc?q=${encodeURIComponent(q)}&apikey=${NETHER_KEY}`;
 
-function pickVideoUrl(data: unknown): string | undefined {
-  const d = data as Record<string, unknown> | undefined;
-  const res = (d?.resultado ?? d?.result ?? d?.data ?? d) as unknown;
-  const arr = Array.isArray(res)
-    ? res
-    : ((res as Record<string, unknown>)?.videos as unknown[] | undefined);
-  const vid = (Array.isArray(arr) ? arr[0] : res) as Record<string, unknown> | undefined;
-  const u = vid?.url ?? vid?.link ?? vid?.href;
-  return typeof u === "string" ? u : undefined;
+interface Track {
+  url: string;
+  title?: string;
+  author?: string;
+  seconds?: number;
+  timestamp?: string;
 }
 
-async function resolveYouTubeUrl(q: string): Promise<string | undefined> {
-  if (/^https?:\/\//i.test(q)) return q;
+function firstTrack(data: unknown): Track | undefined {
+  const d = data as Record<string, any> | undefined;
+  const list = d?.resultado ?? d?.result ?? d?.data;
+  const v = (Array.isArray(list) ? list[0] : Array.isArray(d) ? d[0] : d) as
+    | Record<string, any>
+    | undefined;
+  const url = v?.url ?? v?.link;
+  if (typeof url !== "string") return undefined;
+  return {
+    url,
+    title: v?.title ?? v?.titulo,
+    author: v?.author?.name ?? v?.author ?? v?.channel?.name ?? v?.channel,
+    seconds: typeof v?.seconds === "number" ? v.seconds : v?.duration?.seconds,
+    timestamp: v?.timestamp ?? v?.duration?.timestamp,
+  };
+}
+
+async function resolveTrack(q: string): Promise<Track | undefined> {
+  if (/^https?:\/\//i.test(q)) return { url: q };
   const r = await fetch(ytSearchUrl(q));
   if (!r.ok) throw new Error(`busca YouTube: HTTP ${r.status}`);
-  return pickVideoUrl(await r.json().catch(() => undefined));
+  return firstTrack(await r.json().catch(() => undefined));
 }
 
 function ramLine(msg: IncomingMessage, dlMs: number, bytes: number, rss0: number, rss1: number): string {
@@ -110,22 +125,30 @@ const playCmd = async (args: string, msg: IncomingMessage): Promise<string | und
   if (!q) return "uso: !play <url do YouTube ou nome da música>";
   try {
     const rss0 = process.memoryUsage().rss;
-    const url = await resolveYouTubeUrl(q);
-    if (!url) return "não achei nada pra essa busca — passe a URL direto ou ajuste ytSearchUrl()";
+    const track = await resolveTrack(q);
+    if (!track) return "não achei nada pra essa busca";
 
     const t0 = Date.now();
-    const res = await fetch(ytAudioUrl(url));
+    const res = await fetch(ytAudioUrl(track.url));
     if (!res.ok) return `falha ao baixar o áudio: HTTP ${res.status}`;
+    const ct = res.headers.get("content-type") ?? "";
     const bytes = new Uint8Array(await res.arrayBuffer());
     const dlMs = Date.now() - t0;
     const rss1 = process.memoryUsage().rss;
 
-    await conn.sendText(msg.from, `🎵 *play* — ${url}\n\n${ramLine(msg, dlMs, bytes.length, rss0, rss1)}`);
+    const head = track.title
+      ? `🎵 *${track.title}*` +
+        (track.author ? ` — ${track.author}` : "") +
+        (track.timestamp ? ` (${track.timestamp})` : "") +
+        `\n${track.url}`
+      : `🎵 *play* — ${track.url}`;
+    await conn.sendText(msg.from, `${head}\n\n${ramLine(msg, dlMs, bytes.length, rss0, rss1)}`);
 
+    const mime = ct.startsWith("audio/") ? ct.split(";")[0]! : "audio/mpeg";
     const tUp = Date.now();
-    await conn.sendAudio(msg.from, bytes, { mimetype: "audio/mp4" });
+    await conn.sendAudio(msg.from, bytes, { mimetype: mime, seconds: track.seconds });
     console.log(
-      `→ ${msg.from}: audioMessage  (upload+envio ${Date.now() - tUp}ms, ${humanBytes(bytes.length)})`,
+      `→ ${msg.from}: audioMessage ${mime} (upload+envio ${Date.now() - tUp}ms, ${humanBytes(bytes.length)})`,
     );
   } catch (e) {
     return `erro no !play: ${(e as Error).message}`;
