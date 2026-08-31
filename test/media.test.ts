@@ -1,0 +1,214 @@
+// Camada de mídia (src/media/index.ts): cifra um áudio, faz o <iq> media_conn,
+// posta no host e devolve `audioMessage`. Sem socket nem rede de verdade — o
+// `query` e o `fetch` são dublês que capturam o que a camada mandaria.
+
+import { crypto } from "../src/crypto";
+import { createMediaLayer } from "../src/media";
+import { node, getBinaryNodeChild, type BinaryNode } from "../src/frame/node";
+import { encodeE2EMessage, decodeE2EMessage } from "../src/proto/e2e-message";
+import { utf8Encode } from "../src/frame/buffer";
+
+const C = crypto();
+let pass = 0;
+let fail = 0;
+const fails: string[] = [];
+const ok = (n: string, c: boolean, d = "") => {
+  if (c) pass++;
+  else {
+    fail++;
+    fails.push(n + (d ? ` — ${d}` : ""));
+  }
+};
+const eq = (a: Uint8Array, b: Uint8Array) =>
+  a.length === b.length && a.every((x, i) => x === b[i]);
+
+function b64urlDecode(s: string): Uint8Array {
+  const T = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  const out: number[] = [];
+  let bits = 0;
+  let acc = 0;
+  for (const ch of s) {
+    const v = T.indexOf(ch);
+    if (v < 0) continue;
+    acc = (acc << 6) | v;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out.push((acc >> bits) & 0xff);
+    }
+  }
+  return Uint8Array.from(out);
+}
+
+// --- dublês ---------------------------------------------------------------
+const AUDIO = C.randomBytes(5000); // "arquivo" de áudio
+
+let iqSent: BinaryNode | undefined;
+const query = async (n: BinaryNode): Promise<BinaryNode> => {
+  iqSent = n;
+  return node("iq", { type: "result", id: n.attrs.id }, [
+    node("media_conn", { auth: "AUTH+TOKEN/xyz==", ttl: "3600" }, [
+      node("host", { hostname: "mmg.example.net" }),
+      node("host", { hostname: "mmg-fallback.example.net" }),
+    ]),
+  ]);
+};
+
+let postUrl = "";
+let postBody: Uint8Array | undefined;
+let postHeaders: Record<string, string> | undefined;
+const fetchOk = async (url: string, init?: { headers?: Record<string, string>; body?: Uint8Array }) => {
+  postUrl = url;
+  postBody = init?.body;
+  postHeaders = init?.headers;
+  return {
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify({ url: "https://mmg.example.net/v/file", direct_path: "/v/file" }),
+  };
+};
+
+// --- happy path ---------------------------------------------------------
+{
+  const media = createMediaLayer({ crypto: C, query, fetch: fetchOk });
+  const msg = await media.buildAudioMessage(AUDIO, { mimetype: "audio/mpeg", seconds: 42, ptt: true });
+  const a = msg.audioMessage!;
+
+  ok("iq: xmlns w:m / type set", iqSent?.attrs.xmlns === "w:m" && iqSent?.attrs.type === "set");
+  ok("iq: tem <media_conn>", !!getBinaryNodeChild(iqSent, "media_conn"));
+
+  ok("POST no primeiro host", postUrl.startsWith("https://mmg.example.net/mms/audio/"));
+  ok("URL tem auth= url-encoded", postUrl.includes("auth=AUTH%2BTOKEN%2Fxyz%3D%3D"));
+  ok("URL tem token=", /[?&]token=[A-Za-z0-9_-]{43}(&|$)/.test(postUrl));
+  ok("header Content-Type octet-stream", postHeaders?.["Content-Type"] === "application/octet-stream");
+  ok("header Origin web.whatsapp.com", postHeaders?.Origin === "https://web.whatsapp.com");
+
+  // corpo = enc ‖ mac(10);  sha256(corpo) = fileEncSha256 = token da URL
+  ok("body = enc ‖ mac de 10 bytes", !!postBody && postBody.length === (a.fileLength! + (16 - (a.fileLength! % 16)) + 10));
+  ok("fileEncSha256 = sha256(body)", !!postBody && eq(a.fileEncSha256!, C.sha256(postBody)));
+  const tokenInUrl = decodeURIComponent(postUrl.split("/mms/audio/")[1]!.split("?")[0]!);
+  ok("token da URL = fileEncSha256", eq(b64urlDecode(tokenInUrl), a.fileEncSha256!));
+
+  // decifra o corpo com a mediaKey → volta o áudio original (valida HKDF/CBC/MAC)
+  const exp = C.hkdf(a.mediaKey!, 112, { info: utf8Encode("WhatsApp Audio Keys") });
+  const iv = exp.subarray(0, 16);
+  const cipherKey = exp.subarray(16, 48);
+  const macKey = exp.subarray(48, 80);
+  const enc = postBody!.subarray(0, postBody!.length - 10);
+  const mac = postBody!.subarray(postBody!.length - 10);
+  const macCalc = C.hmacSha256(macKey, concat(iv, enc)).subarray(0, 10);
+  ok("mac de 10 bytes confere", eq(mac, macCalc));
+  ok("AES-CBC decifra de volta o áudio", eq(C.aesCbcDecrypt(cipherKey, iv, enc), AUDIO));
+
+  ok("fileSha256 = sha256(plaintext)", eq(a.fileSha256!, C.sha256(AUDIO)));
+  ok("fileLength = tamanho do áudio", a.fileLength === AUDIO.length);
+  ok("url / directPath do JSON", a.url === "https://mmg.example.net/v/file" && a.directPath === "/v/file");
+  ok("mimetype preservado", a.mimetype === "audio/mpeg");
+  ok("seconds / ptt preservados", a.seconds === 42 && a.ptt === true);
+  ok("mediaKeyTimestamp ~ agora", Math.abs(a.mediaKeyTimestamp! - Math.floor(Date.now() / 1000)) <= 5);
+
+  // roundtrip no codec E2E
+  const rt = decodeE2EMessage(encodeE2EMessage(msg)).audioMessage!;
+  ok("codec: url", rt.url === a.url);
+  ok("codec: directPath", rt.directPath === a.directPath);
+  ok("codec: mediaKey", eq(rt.mediaKey!, a.mediaKey!));
+  ok("codec: fileEncSha256", eq(rt.fileEncSha256!, a.fileEncSha256!));
+  ok("codec: fileSha256", eq(rt.fileSha256!, a.fileSha256!));
+  ok("codec: fileLength", rt.fileLength === a.fileLength);
+  ok("codec: seconds / ptt", rt.seconds === 42 && rt.ptt === true);
+  ok("codec: mediaKeyTimestamp", rt.mediaKeyTimestamp === a.mediaKeyTimestamp);
+}
+
+// --- default mimetype + música (sem ptt) ------------------------------
+{
+  const media = createMediaLayer({ crypto: C, query, fetch: fetchOk });
+  const msg = await media.buildAudioMessage(AUDIO);
+  ok("mimetype default audio/mp4", msg.audioMessage!.mimetype === "audio/mp4");
+  ok("ptt ausente vira undefined", msg.audioMessage!.ptt === undefined);
+  const rt = decodeE2EMessage(encodeE2EMessage(msg)).audioMessage!;
+  ok("codec: ptt false não vaza como true", rt.ptt === false);
+}
+
+// --- fallback de host quando o primeiro falha ------------------------
+{
+  let n = 0;
+  const flaky = async (url: string, init?: { headers?: Record<string, string>; body?: Uint8Array }) => {
+    n++;
+    if (url.includes("//mmg.example.net/")) return { ok: false, status: 500, text: async () => "boom" };
+    return fetchOk(url, init);
+  };
+  const media = createMediaLayer({ crypto: C, query, fetch: flaky });
+  const msg = await media.buildAudioMessage(AUDIO);
+  ok("tentou 2 hosts", n === 2);
+  ok("subiu pelo host de fallback", postUrl.includes("mmg-fallback.example.net"));
+  ok("audioMessage mesmo assim", !!msg.audioMessage?.url);
+}
+
+// --- erros -----------------------------------------------------------
+{
+  const noFetch = createMediaLayer({ crypto: C, query });
+  let threw = "";
+  try {
+    await noFetch.buildAudioMessage(AUDIO);
+  } catch (e) {
+    threw = (e as Error).message;
+  }
+  ok("sem fetch → erro claro", threw.includes("fetch"), threw);
+}
+{
+  const media = createMediaLayer({ crypto: C, query, fetch: fetchOk });
+  let threw = "";
+  try {
+    await media.buildAudioMessage(new Uint8Array(0));
+  } catch (e) {
+    threw = (e as Error).message;
+  }
+  ok("áudio vazio → erro", threw.length > 0, threw);
+}
+{
+  const badConn = async (nq: BinaryNode) =>
+    node("iq", { type: "result", id: nq.attrs.id }, [node("media_conn", { ttl: "1" })]);
+  const media = createMediaLayer({ crypto: C, query: badConn, fetch: fetchOk });
+  let threw = "";
+  try {
+    await media.buildAudioMessage(AUDIO);
+  } catch (e) {
+    threw = (e as Error).message;
+  }
+  ok("media_conn sem auth/hosts → erro", threw.includes("auth") || threw.includes("host"), threw);
+}
+{
+  const allFail = async (url: string, init?: { headers?: Record<string, string>; body?: Uint8Array }) => ({
+    ok: false,
+    status: 503,
+    text: async () => "nope",
+  });
+  const media = createMediaLayer({ crypto: C, query, fetch: allFail });
+  let threw = "";
+  try {
+    await media.buildAudioMessage(AUDIO);
+  } catch (e) {
+    threw = (e as Error).message;
+  }
+  ok("todos os hosts com erro → propaga HTTP 503", threw.includes("503"), threw);
+}
+
+function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a, 0);
+  out.set(b, a.length);
+  return out;
+}
+
+const rt =
+  typeof (globalThis as any).Bun !== "undefined"
+    ? "bun"
+    : typeof (globalThis as any).RTS !== "undefined"
+      ? "rts"
+      : "node";
+console.log(`\noniwalib/media [${rt}]  ${pass} pass, ${fail} fail`);
+for (const f of fails) console.log("  ✗ " + f);
+if (fail > 0) {
+  if (typeof process !== "undefined") process.exitCode = 1;
+  throw new Error(`${fail} falha(s)`);
+}

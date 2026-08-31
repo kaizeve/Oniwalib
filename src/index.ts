@@ -71,6 +71,14 @@ export {
 } from "./messages";
 
 export {
+  createMediaLayer,
+  type MediaLayer,
+  type MediaLayerOptions,
+  type AudioOptions,
+  type FetchLike,
+} from "./media";
+
+export {
   createPresenceLayer,
   type PresenceLayer,
   type PresenceLayerOptions,
@@ -87,6 +95,7 @@ export {
   decodeE2EMessage,
   messageText,
   type E2EMessage,
+  type E2EAudioMessage,
   type E2EButtonsMessage,
   type E2EListMessage,
   type E2EListRow,

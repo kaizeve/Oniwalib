@@ -12,6 +12,7 @@ import { Emitter, type MessageKey, type WAPresence } from "./events/emitter";
 import { connectOni } from "./connect";
 import { configureSuccessfulPairing } from "./pairing";
 import { createMessagesLayer, type MessagesLayer } from "./messages";
+import { createMediaLayer, type MediaLayer, type FetchLike, type AudioOptions } from "./media";
 import { createPresenceLayer, type PresenceLayer } from "./presence";
 import { createNotificationsLayer, type NotificationsLayer } from "./notifications";
 import type { E2EMessage } from "./proto/e2e-message";
@@ -47,6 +48,9 @@ export interface OpenOptions {
   connector?: Connector;
   countryCode?: string;
   crypto?: Crypto;
+  /** Cliente HTTP para upload de mídia. Default `globalThis.fetch`. Sem ele,
+   *  `sendAudio` lança (o núcleo não assume um global de rede). */
+  fetch?: FetchLike;
   /** ms entre pings de keepalive. Default 25000. */
   keepAliveMs?: number;
   /** Máx. de reconexões automáticas seguidas antes de desistir. Default 5. */
@@ -66,6 +70,9 @@ export interface OniConnection {
   sendText(jid: string, text: string): Promise<{ id: string }>;
   /** Como `sendText`, mas com um `Message` inteiro — botões, lista, viewOnce… */
   sendMessage(jid: string, msg: E2EMessage): Promise<{ id: string }>;
+  /** Cifra + sobe um áudio ao servidor de mídia e envia (1:1 ou grupo). Precisa
+   *  de `fetch` (default `globalThis.fetch`) e de sessão Signal com `jid`. */
+  sendAudio(jid: string, data: Uint8Array, opts?: AudioOptions): Promise<{ id: string }>;
   /** Reage a uma mensagem (`emoji` vazio remove a reação). Precisa de sessão. */
   sendReaction(jid: string, key: MessageKey, emoji: string): Promise<{ id: string }>;
   /** Anuncia a nossa presença. `available`/`unavailable` é global; `composing`/
@@ -101,6 +108,20 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
   let keepAlive: ReturnType<typeof setInterval> | undefined;
   let qrTimer: ReturnType<typeof setTimeout> | undefined;
 
+  // `<iq>` à espera de resposta, por id. Resolvido no `<iq type=result|error>`
+  // com o mesmo id (ver `handleNode`), ou rejeitado no timeout / teardown.
+  const pendingIq = new Map<
+    string,
+    { resolve: (n: BinaryNode) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
+  >();
+  const failPendingIq = (reason: string) => {
+    for (const [, p] of pendingIq) {
+      clearTimeout(p.timer);
+      p.reject(new Error(reason));
+    }
+    pendingIq.clear();
+  };
+
   const clearTimers = () => {
     if (keepAlive) clearInterval(keepAlive);
     if (qrTimer) clearTimeout(qrTimer);
@@ -110,6 +131,7 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
 
   const teardown = () => {
     clearTimers();
+    failPendingIq("conexão reiniciada antes da resposta do <iq>");
     for (const off of unbind) off();
     unbind = [];
     try {
@@ -138,6 +160,27 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     socket.sendNode(n);
   };
 
+  // Envia um `<iq>` e resolve com o `<iq type=result>` de mesmo id. O
+  // `handleNode` casa a resposta pelo id em `pendingIq`.
+  const query = (n: BinaryNode, timeoutMs = 20000): Promise<BinaryNode> => {
+    const id = n.attrs.id || genId();
+    n.attrs.id = id;
+    return new Promise<BinaryNode>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pendingIq.delete(id);
+        reject(new Error(`iq ${id}: sem resposta em ${timeoutMs}ms`));
+      }, timeoutMs);
+      pendingIq.set(id, { resolve, reject, timer });
+      try {
+        send(n);
+      } catch (e) {
+        pendingIq.delete(id);
+        clearTimeout(timer);
+        reject(e as Error);
+      }
+    });
+  };
+
   // Camada de mensagem (Signal): decifra <message>, cifra sendText, sobe
   // pré-chaves. Só faz sentido depois do <success>; antes disso `send` lança.
   const messages: MessagesLayer = createMessagesLayer({
@@ -149,6 +192,14 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     saveCreds: opts.saveCreds,
   });
   let preKeysUploaded = false;
+
+  // Camada de mídia: cifra + sobe o anexo (HTTP) e devolve o `Message` pronto,
+  // que segue pelo mesmo `messages.sendMessage` (1:1 ou grupo).
+  const media: MediaLayer = createMediaLayer({
+    crypto: c,
+    query,
+    fetch: opts.fetch ?? (globalThis as { fetch?: FetchLike }).fetch,
+  });
 
   // Presença (online/digitando) e notificações de perfil (foto/recado). Só
   // fazem sentido depois do <success>; antes disso `send` lança.
@@ -300,6 +351,20 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
       case "iq": {
         if (getBinaryNodeChild(n, "pair-device")) return handlePairDevice(n);
         if (getBinaryNodeChild(n, "pair-success")) return handlePairSuccess(n);
+        // resposta a um `query()` nosso (ex.: media_conn)
+        if (n.attrs.id && pendingIq.has(n.attrs.id) &&
+            (n.attrs.type === "result" || n.attrs.type === "error")) {
+          const p = pendingIq.get(n.attrs.id)!;
+          pendingIq.delete(n.attrs.id);
+          clearTimeout(p.timer);
+          if (n.attrs.type === "error") {
+            const err = getBinaryNodeChild(n, "error");
+            p.reject(new Error(`iq ${n.attrs.id}: erro ${err?.attrs.code ?? ""} ${err?.attrs.text ?? ""}`.trim()));
+          } else {
+            p.resolve(n);
+          }
+          return;
+        }
         // ping do servidor → responde result
         if (n.attrs.type === "get" && getBinaryNodeChild(n, "ping") && n.attrs.id) {
           try {
@@ -417,6 +482,10 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     sendNode: send,
     sendText: (jid, text) => messages.sendText(jid, text),
     sendMessage: (jid, msg) => messages.sendMessage(jid, msg),
+    sendAudio: async (jid, data, audioOpts) => {
+      const msg = await media.buildAudioMessage(data, audioOpts);
+      return messages.sendMessage(jid, msg);
+    },
     sendReaction: (jid, key, emoji) => messages.sendReaction(jid, key, emoji),
     sendPresenceUpdate: (type, toJid) => presence.sendPresenceUpdate(type, toJid),
     subscribePresence: (jid) => presence.subscribePresence(jid),

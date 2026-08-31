@@ -99,9 +99,32 @@ export interface E2EInteractiveMessage {
   };
 }
 
+/**
+ * AudioMessage (campo 8). O mínimo para mandar um áudio já cifrado e subido ao
+ * servidor de mídia: os hashes/chave que o destinatário usa para baixar e
+ * decifrar (`mediaKey` + HKDF "WhatsApp Audio Keys"), mais `url`/`directPath`.
+ * `ptt` marca nota de voz; sem ele o WhatsApp mostra player de música.
+ */
+export interface E2EAudioMessage {
+  url?: string;
+  mimetype?: string;
+  fileSha256?: Uint8Array;
+  fileLength?: number;
+  /** Duração em segundos. */
+  seconds?: number;
+  /** `true` = nota de voz (push-to-talk). */
+  ptt?: boolean;
+  mediaKey?: Uint8Array;
+  fileEncSha256?: Uint8Array;
+  directPath?: string;
+  /** Unix em segundos — quando a `mediaKey` foi criada. */
+  mediaKeyTimestamp?: number;
+}
+
 export interface E2EMessage {
   conversation?: string;
   extendedTextMessage?: { text?: string };
+  audioMessage?: E2EAudioMessage;
   deviceSentMessage?: { destinationJid?: string; message?: E2EMessage };
   senderKeyDistributionMessage?: {
     groupId?: string;
@@ -221,6 +244,21 @@ export function encodeE2EMessage(m: E2EMessage): Uint8Array {
   if (m.conversation !== undefined) w.string(1, m.conversation);
   if (m.extendedTextMessage) {
     w.message(6, new Writer().string(1, m.extendedTextMessage.text));
+  }
+  if (m.audioMessage) {
+    const a = m.audioMessage;
+    const sub = new Writer();
+    sub.string(1, a.url);
+    sub.string(2, a.mimetype);
+    sub.bytes(3, a.fileSha256);
+    if (a.fileLength !== undefined) sub.uint(4, a.fileLength);
+    if (a.seconds !== undefined) sub.uint(5, a.seconds);
+    if (a.ptt !== undefined) sub.bool(6, a.ptt);
+    sub.bytes(7, a.mediaKey);
+    sub.bytes(8, a.fileEncSha256);
+    sub.string(9, a.directPath);
+    if (a.mediaKeyTimestamp !== undefined) sub.uint(10, a.mediaKeyTimestamp);
+    w.message(8, sub);
   }
   if (m.deviceSentMessage) {
     const sub = new Writer().string(1, m.deviceSentMessage.destinationJid);
@@ -348,6 +386,27 @@ export function decodeE2EMessage(bytes: Uint8Array): E2EMessage {
   if (ext) {
     const sf = new Reader(ext).fields();
     out.extendedTextMessage = { text: asStr(sf.get(1)?.[0]) };
+  }
+
+  const aud = asBytes(f.get(8)?.[0]);
+  if (aud) {
+    const sf = new Reader(aud).fields();
+    const num = (n: number): number | undefined => {
+      const v = sf.get(n)?.[0];
+      return typeof v === "number" ? v : undefined;
+    };
+    out.audioMessage = {
+      url: asStr(sf.get(1)?.[0]),
+      mimetype: asStr(sf.get(2)?.[0]),
+      fileSha256: asBytes(sf.get(3)?.[0]),
+      fileLength: num(4),
+      seconds: num(5),
+      ptt: sf.get(6)?.[0] === 1,
+      mediaKey: asBytes(sf.get(7)?.[0]),
+      fileEncSha256: asBytes(sf.get(8)?.[0]),
+      directPath: asStr(sf.get(9)?.[0]),
+      mediaKeyTimestamp: num(10),
+    };
   }
 
   const dsm = asBytes(f.get(31)?.[0]);

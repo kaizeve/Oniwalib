@@ -16,6 +16,12 @@
 // desenha mais os `buttonsMessage`/`listMessage` legados de cliente não-oficial;
 // o toque volta como o id `!comando` e cai no mesmo handler). !help lista tudo.
 //
+// !play <url|nome> — baixa um áudio do YouTube (API nether) e ENVIA como
+// `audioMessage` de verdade (cifra + upload pro servidor de mídia). Sem botões
+// (a lib não os renderiza); no lugar responde uma linha com ping + uso de RAM,
+// pra medir o custo de memória de puxar o arquivo. Key/endpoints via env
+// NETHER_KEY / NETHER_API (defaults abaixo).
+//
 // Grupos: LÊ (decifra `skmsg` via sender keys) E RESPONDE — cria o nosso sender
 // key, manda `skmsg`, e distribui o SKDM 1:1 pra quem já tem sessão pairwise
 // com o bot. Quem nunca falou no grupo desde que o bot subiu não vê a resposta
@@ -29,6 +35,7 @@ import qrcode from "qrcode-terminal";
 import { openWhatsApp } from "../src/client";
 import { fileAuthState } from "../src/auth/file-state";
 import { OniBot, type IncomingMessage } from "../src/bot/bot";
+import { humanBytes } from "../src/bot/monitor";
 import { STOCK } from "../src/profiles/index";
 import { messageText } from "../src/proto/e2e-message";
 
@@ -55,6 +62,79 @@ const conn = openWhatsApp({
   countryCode: "BR",
   maxRetries: 1_000_000,
 });
+
+// ── !play / !musica / !youtube ──────────────────────────────────────────────
+// Teste de RAM: puxa o áudio da API nether pra memória e ENVIA como
+// `audioMessage`. Sem botões — responde ping + uso de memória no lugar.
+const NETHER_KEY = process.env.NETHER_KEY ?? "mefodemegumi";
+const NETHER_API = process.env.NETHER_API ?? "https://api.netherhost.com.br/api";
+const ytAudioUrl = (url: string) =>
+  `${NETHER_API}/dl/ytaudio2?url=${encodeURIComponent(url)}&apikey=${NETHER_KEY}`;
+// Endpoint de busca — ajuste o path se a sua API usar outro.
+const ytSearchUrl = (q: string) =>
+  `${NETHER_API}/pesquisas/youtube?query=${encodeURIComponent(q)}&apikey=${NETHER_KEY}`;
+
+function pickVideoUrl(data: unknown): string | undefined {
+  const d = data as Record<string, unknown> | undefined;
+  const res = (d?.resultado ?? d?.result ?? d?.data ?? d) as unknown;
+  const arr = Array.isArray(res)
+    ? res
+    : ((res as Record<string, unknown>)?.videos as unknown[] | undefined);
+  const vid = (Array.isArray(arr) ? arr[0] : res) as Record<string, unknown> | undefined;
+  const u = vid?.url ?? vid?.link ?? vid?.href;
+  return typeof u === "string" ? u : undefined;
+}
+
+async function resolveYouTubeUrl(q: string): Promise<string | undefined> {
+  if (/^https?:\/\//i.test(q)) return q;
+  const r = await fetch(ytSearchUrl(q));
+  if (!r.ok) throw new Error(`busca YouTube: HTTP ${r.status}`);
+  return pickVideoUrl(await r.json().catch(() => undefined));
+}
+
+function ramLine(msg: IncomingMessage, dlMs: number, bytes: number, rss0: number, rss1: number): string {
+  const ping = msg.timestamp
+    ? `${Math.max(0, Date.now() - msg.timestamp * 1000)}ms`
+    : "n/d";
+  const m = process.memoryUsage();
+  return [
+    `📡 ping: ~${ping}`,
+    `⏬ download: ${humanBytes(bytes)} em ${dlMs}ms`,
+    `🧠 RSS: ${humanBytes(m.rss)}  (Δ +${humanBytes(Math.max(0, rss1 - rss0))} no fetch)`,
+    `🧩 heap: ${humanBytes(m.heapUsed)} / ${humanBytes(m.heapTotal)} · nativo ${humanBytes(m.external)}`,
+  ].join("\n");
+}
+
+const playCmd = async (args: string, msg: IncomingMessage): Promise<string | undefined> => {
+  const q = args.trim();
+  if (!q) return "uso: !play <url do YouTube ou nome da música>";
+  try {
+    const rss0 = process.memoryUsage().rss;
+    const url = await resolveYouTubeUrl(q);
+    if (!url) return "não achei nada pra essa busca — passe a URL direto ou ajuste ytSearchUrl()";
+
+    const t0 = Date.now();
+    const res = await fetch(ytAudioUrl(url));
+    if (!res.ok) return `falha ao baixar o áudio: HTTP ${res.status}`;
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const dlMs = Date.now() - t0;
+    const rss1 = process.memoryUsage().rss;
+
+    await conn.sendText(msg.from, `🎵 *play* — ${url}\n\n${ramLine(msg, dlMs, bytes.length, rss0, rss1)}`);
+
+    const tUp = Date.now();
+    await conn.sendAudio(msg.from, bytes, { mimetype: "audio/mp4" });
+    console.log(
+      `→ ${msg.from}: audioMessage  (upload+envio ${Date.now() - tUp}ms, ${humanBytes(bytes.length)})`,
+    );
+  } catch (e) {
+    return `erro no !play: ${(e as Error).message}`;
+  }
+  return undefined;
+};
+bot.register("play", "baixa e envia um áudio do YouTube + ping/RAM (teste de memória)", playCmd);
+bot.register("musica", "alias de !play", playCmd);
+bot.register("youtube", "alias de !play", playCmd);
 
 conn.events.on("connection.update", (u) => {
   if (u.qr) {
