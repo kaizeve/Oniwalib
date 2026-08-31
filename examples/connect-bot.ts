@@ -159,6 +159,83 @@ bot.register("play", "baixa e envia um áudio do YouTube + ping/RAM (teste de me
 bot.register("musica", "alias de !play", playCmd);
 bot.register("youtube", "alias de !play", playCmd);
 
+// ── mídia + perfil ─────────────────────────────────────────────────────────
+// Baixa uma URL para a memória e repassa aos helpers da lib. Formato:
+//   !img <url> [legenda...]   envia foto        !doc <url> [nome do arquivo]
+//   !fig <url>                envia figurinha    !foto <url>  troca a foto do perfil
+//   !bio <texto>              troca o recado
+async function grab(url: string): Promise<{ bytes: Uint8Array; mime: string }> {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status} ao baixar ${url}`);
+  return { bytes: new Uint8Array(await r.arrayBuffer()), mime: (r.headers.get("content-type") ?? "").split(";")[0]! };
+}
+
+bot.register("img", "envia uma foto de uma URL (!img <url> [legenda])", async (args, msg) => {
+  const [url, ...rest] = args.trim().split(/\s+/);
+  if (!url) return "uso: !img <url> [legenda]";
+  try {
+    const { bytes, mime } = await grab(url);
+    await conn.sendImage(msg.from, bytes, {
+      mimetype: mime.startsWith("image/") ? mime : "image/jpeg",
+      caption: rest.join(" ") || undefined,
+    });
+    console.log(`→ ${msg.from}: imageMessage (${humanBytes(bytes.length)})`);
+  } catch (e) {
+    return `erro no !img: ${(e as Error).message}`;
+  }
+  return undefined;
+});
+
+bot.register("doc", "envia um arquivo de uma URL (!doc <url> [nome])", async (args, msg) => {
+  const [url, ...rest] = args.trim().split(/\s+/);
+  if (!url) return "uso: !doc <url> [nome do arquivo]";
+  try {
+    const { bytes, mime } = await grab(url);
+    const fileName = rest.join(" ") || url.split("/").pop()?.split("?")[0] || "arquivo";
+    await conn.sendDocument(msg.from, bytes, { mimetype: mime || undefined, fileName });
+    console.log(`→ ${msg.from}: documentMessage ${fileName} (${humanBytes(bytes.length)})`);
+  } catch (e) {
+    return `erro no !doc: ${(e as Error).message}`;
+  }
+  return undefined;
+});
+
+bot.register("fig", "envia uma figurinha de uma URL (webp/png/jpg)", async (args, msg) => {
+  const url = args.trim();
+  if (!url) return "uso: !fig <url de imagem>";
+  try {
+    const { bytes } = await grab(url);
+    await conn.sendSticker(msg.from, bytes);
+    console.log(`→ ${msg.from}: stickerMessage (${humanBytes(bytes.length)})`);
+  } catch (e) {
+    return `erro no !fig: ${(e as Error).message}`;
+  }
+  return undefined;
+});
+
+bot.register("foto", "troca a foto de perfil do bot (!foto <url de imagem>)", async (args) => {
+  const url = args.trim();
+  if (!url) return "uso: !foto <url de imagem quadrada, JPEG)>";
+  try {
+    const { bytes } = await grab(url);
+    await conn.setProfilePicture(bytes);
+    return "✅ foto de perfil atualizada";
+  } catch (e) {
+    return `erro no !foto: ${(e as Error).message}`;
+  }
+});
+
+bot.register("bio", "troca o recado/bio do bot (!bio <texto>)", async (args) => {
+  const text = args.trim();
+  if (!text) return "uso: !bio <texto>";
+  try {
+    await conn.setBio(text);
+    return `✅ recado atualizado para: ${text}`;
+  } catch (e) {
+    return `erro no !bio: ${(e as Error).message}`;
+  }
+});
+
 conn.events.on("connection.update", (u) => {
   if (u.qr) {
     console.log("\nescaneie (WhatsApp > Aparelhos conectados > Conectar um aparelho):\n");

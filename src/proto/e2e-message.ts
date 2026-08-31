@@ -121,10 +121,84 @@ export interface E2EAudioMessage {
   mediaKeyTimestamp?: number;
 }
 
+/** ImageMessage (campo 3). Mesma cifra/upload do áudio (HKDF "WhatsApp Image
+ *  Keys"). `jpegThumbnail` é o preview que aparece antes do download. */
+export interface E2EImageMessage {
+  url?: string;
+  mimetype?: string;
+  caption?: string;
+  fileSha256?: Uint8Array;
+  fileLength?: number;
+  height?: number;
+  width?: number;
+  mediaKey?: Uint8Array;
+  fileEncSha256?: Uint8Array;
+  directPath?: string;
+  mediaKeyTimestamp?: number;
+  jpegThumbnail?: Uint8Array;
+}
+
+/** VideoMessage (campo 9). HKDF "WhatsApp Video Keys". `gifPlayback` faz o
+ *  WhatsApp tratar um mp4 curto como GIF. */
+export interface E2EVideoMessage {
+  url?: string;
+  mimetype?: string;
+  fileSha256?: Uint8Array;
+  fileLength?: number;
+  seconds?: number;
+  mediaKey?: Uint8Array;
+  caption?: string;
+  gifPlayback?: boolean;
+  height?: number;
+  width?: number;
+  fileEncSha256?: Uint8Array;
+  directPath?: string;
+  mediaKeyTimestamp?: number;
+  jpegThumbnail?: Uint8Array;
+}
+
+/** DocumentMessage (campo 7). HKDF "WhatsApp Document Keys". `fileName` é o que
+ *  aparece no chat; `title` é o rótulo interno. */
+export interface E2EDocumentMessage {
+  url?: string;
+  mimetype?: string;
+  title?: string;
+  fileSha256?: Uint8Array;
+  fileLength?: number;
+  pageCount?: number;
+  mediaKey?: Uint8Array;
+  fileName?: string;
+  fileEncSha256?: Uint8Array;
+  directPath?: string;
+  mediaKeyTimestamp?: number;
+  caption?: string;
+  jpegThumbnail?: Uint8Array;
+}
+
+/** StickerMessage (campo 26). HKDF "WhatsApp Image Keys", tipo de upload
+ *  `image`. `isAnimated` para webp animado. */
+export interface E2EStickerMessage {
+  url?: string;
+  fileSha256?: Uint8Array;
+  fileEncSha256?: Uint8Array;
+  mediaKey?: Uint8Array;
+  mimetype?: string;
+  height?: number;
+  width?: number;
+  directPath?: string;
+  fileLength?: number;
+  mediaKeyTimestamp?: number;
+  isAnimated?: boolean;
+}
+
 export interface E2EMessage {
   conversation?: string;
   extendedTextMessage?: { text?: string };
   audioMessage?: E2EAudioMessage;
+  imageMessage?: E2EImageMessage;
+  videoMessage?: E2EVideoMessage;
+  documentMessage?: E2EDocumentMessage;
+  stickerMessage?: E2EStickerMessage;
   deviceSentMessage?: { destinationJid?: string; message?: E2EMessage };
   senderKeyDistributionMessage?: {
     groupId?: string;
@@ -259,6 +333,76 @@ export function encodeE2EMessage(m: E2EMessage): Uint8Array {
     sub.string(9, a.directPath);
     if (a.mediaKeyTimestamp !== undefined) sub.uint(10, a.mediaKeyTimestamp);
     w.message(8, sub);
+  }
+  if (m.imageMessage) {
+    const a = m.imageMessage;
+    const sub = new Writer();
+    sub.string(1, a.url);
+    sub.string(2, a.mimetype);
+    sub.string(3, a.caption);
+    sub.bytes(4, a.fileSha256);
+    if (a.fileLength !== undefined) sub.uint(5, a.fileLength);
+    if (a.height !== undefined) sub.uint(6, a.height);
+    if (a.width !== undefined) sub.uint(7, a.width);
+    sub.bytes(8, a.mediaKey);
+    sub.bytes(9, a.fileEncSha256);
+    sub.string(11, a.directPath);
+    if (a.mediaKeyTimestamp !== undefined) sub.uint(12, a.mediaKeyTimestamp);
+    sub.bytes(16, a.jpegThumbnail);
+    w.message(3, sub);
+  }
+  if (m.documentMessage) {
+    const a = m.documentMessage;
+    const sub = new Writer();
+    sub.string(1, a.url);
+    sub.string(2, a.mimetype);
+    sub.string(3, a.title);
+    sub.bytes(4, a.fileSha256);
+    if (a.fileLength !== undefined) sub.uint(5, a.fileLength);
+    if (a.pageCount !== undefined) sub.uint(6, a.pageCount);
+    sub.bytes(7, a.mediaKey);
+    sub.string(8, a.fileName);
+    sub.bytes(9, a.fileEncSha256);
+    sub.string(10, a.directPath);
+    if (a.mediaKeyTimestamp !== undefined) sub.uint(11, a.mediaKeyTimestamp);
+    sub.bytes(16, a.jpegThumbnail);
+    sub.string(20, a.caption);
+    w.message(7, sub);
+  }
+  if (m.videoMessage) {
+    const a = m.videoMessage;
+    const sub = new Writer();
+    sub.string(1, a.url);
+    sub.string(2, a.mimetype);
+    sub.bytes(3, a.fileSha256);
+    if (a.fileLength !== undefined) sub.uint(4, a.fileLength);
+    if (a.seconds !== undefined) sub.uint(5, a.seconds);
+    sub.bytes(6, a.mediaKey);
+    sub.string(7, a.caption);
+    if (a.gifPlayback !== undefined) sub.bool(8, a.gifPlayback);
+    if (a.height !== undefined) sub.uint(9, a.height);
+    if (a.width !== undefined) sub.uint(10, a.width);
+    sub.bytes(11, a.fileEncSha256);
+    sub.string(13, a.directPath);
+    if (a.mediaKeyTimestamp !== undefined) sub.uint(14, a.mediaKeyTimestamp);
+    sub.bytes(16, a.jpegThumbnail);
+    w.message(9, sub);
+  }
+  if (m.stickerMessage) {
+    const a = m.stickerMessage;
+    const sub = new Writer();
+    sub.string(1, a.url);
+    sub.bytes(2, a.fileSha256);
+    sub.bytes(3, a.fileEncSha256);
+    sub.bytes(4, a.mediaKey);
+    sub.string(5, a.mimetype);
+    if (a.height !== undefined) sub.uint(6, a.height);
+    if (a.width !== undefined) sub.uint(7, a.width);
+    sub.string(8, a.directPath);
+    if (a.fileLength !== undefined) sub.uint(9, a.fileLength);
+    if (a.mediaKeyTimestamp !== undefined) sub.uint(10, a.mediaKeyTimestamp);
+    if (a.isAnimated !== undefined) sub.bool(13, a.isAnimated);
+    w.message(26, sub);
   }
   if (m.deviceSentMessage) {
     const sub = new Writer().string(1, m.deviceSentMessage.destinationJid);
@@ -406,6 +550,88 @@ export function decodeE2EMessage(bytes: Uint8Array): E2EMessage {
       fileEncSha256: asBytes(sf.get(8)?.[0]),
       directPath: asStr(sf.get(9)?.[0]),
       mediaKeyTimestamp: num(10),
+    };
+  }
+
+  const img = asBytes(f.get(3)?.[0]);
+  if (img) {
+    const sf = new Reader(img).fields();
+    const n = (k: number) => (typeof sf.get(k)?.[0] === "number" ? (sf.get(k)![0] as number) : undefined);
+    out.imageMessage = {
+      url: asStr(sf.get(1)?.[0]),
+      mimetype: asStr(sf.get(2)?.[0]),
+      caption: asStr(sf.get(3)?.[0]),
+      fileSha256: asBytes(sf.get(4)?.[0]),
+      fileLength: n(5),
+      height: n(6),
+      width: n(7),
+      mediaKey: asBytes(sf.get(8)?.[0]),
+      fileEncSha256: asBytes(sf.get(9)?.[0]),
+      directPath: asStr(sf.get(11)?.[0]),
+      mediaKeyTimestamp: n(12),
+      jpegThumbnail: asBytes(sf.get(16)?.[0]),
+    };
+  }
+
+  const doc = asBytes(f.get(7)?.[0]);
+  if (doc) {
+    const sf = new Reader(doc).fields();
+    const n = (k: number) => (typeof sf.get(k)?.[0] === "number" ? (sf.get(k)![0] as number) : undefined);
+    out.documentMessage = {
+      url: asStr(sf.get(1)?.[0]),
+      mimetype: asStr(sf.get(2)?.[0]),
+      title: asStr(sf.get(3)?.[0]),
+      fileSha256: asBytes(sf.get(4)?.[0]),
+      fileLength: n(5),
+      pageCount: n(6),
+      mediaKey: asBytes(sf.get(7)?.[0]),
+      fileName: asStr(sf.get(8)?.[0]),
+      fileEncSha256: asBytes(sf.get(9)?.[0]),
+      directPath: asStr(sf.get(10)?.[0]),
+      mediaKeyTimestamp: n(11),
+      jpegThumbnail: asBytes(sf.get(16)?.[0]),
+      caption: asStr(sf.get(20)?.[0]),
+    };
+  }
+
+  const vid2 = asBytes(f.get(9)?.[0]);
+  if (vid2) {
+    const sf = new Reader(vid2).fields();
+    const n = (k: number) => (typeof sf.get(k)?.[0] === "number" ? (sf.get(k)![0] as number) : undefined);
+    out.videoMessage = {
+      url: asStr(sf.get(1)?.[0]),
+      mimetype: asStr(sf.get(2)?.[0]),
+      fileSha256: asBytes(sf.get(3)?.[0]),
+      fileLength: n(4),
+      seconds: n(5),
+      mediaKey: asBytes(sf.get(6)?.[0]),
+      caption: asStr(sf.get(7)?.[0]),
+      gifPlayback: sf.get(8)?.[0] === 1,
+      height: n(9),
+      width: n(10),
+      fileEncSha256: asBytes(sf.get(11)?.[0]),
+      directPath: asStr(sf.get(13)?.[0]),
+      mediaKeyTimestamp: n(14),
+      jpegThumbnail: asBytes(sf.get(16)?.[0]),
+    };
+  }
+
+  const stk = asBytes(f.get(26)?.[0]);
+  if (stk) {
+    const sf = new Reader(stk).fields();
+    const n = (k: number) => (typeof sf.get(k)?.[0] === "number" ? (sf.get(k)![0] as number) : undefined);
+    out.stickerMessage = {
+      url: asStr(sf.get(1)?.[0]),
+      fileSha256: asBytes(sf.get(2)?.[0]),
+      fileEncSha256: asBytes(sf.get(3)?.[0]),
+      mediaKey: asBytes(sf.get(4)?.[0]),
+      mimetype: asStr(sf.get(5)?.[0]),
+      height: n(6),
+      width: n(7),
+      directPath: asStr(sf.get(8)?.[0]),
+      fileLength: n(9),
+      mediaKeyTimestamp: n(10),
+      isAnimated: sf.get(13)?.[0] === 1,
     };
   }
 

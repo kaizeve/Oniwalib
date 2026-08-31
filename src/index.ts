@@ -74,9 +74,19 @@ export {
   createMediaLayer,
   type MediaLayer,
   type MediaLayerOptions,
+  type MediaType,
   type AudioOptions,
+  type ImageOptions,
+  type VideoOptions,
+  type DocumentOptions,
+  type StickerOptions,
   type FetchLike,
 } from "./media";
+export {
+  createProfileLayer,
+  type ProfileLayer,
+  type ProfileLayerOptions,
+} from "./profile";
 
 export {
   createPresenceLayer,
@@ -96,6 +106,10 @@ export {
   messageText,
   type E2EMessage,
   type E2EAudioMessage,
+  type E2EImageMessage,
+  type E2EVideoMessage,
+  type E2EDocumentMessage,
+  type E2EStickerMessage,
   type E2EButtonsMessage,
   type E2EListMessage,
   type E2EListRow,

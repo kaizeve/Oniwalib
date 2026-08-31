@@ -193,6 +193,56 @@ const fetchOk = async (url: string, init?: { headers?: Record<string, string>; b
   ok("todos os hosts com erro → propaga HTTP 503", threw.includes("503"), threw);
 }
 
+// --- outros tipos de mídia -------------------------------------------
+// decifra o último `postBody` com a mediaKey dada + info do tipo.
+function decryptBody(mediaKey: Uint8Array, info: string): Uint8Array {
+  const exp = C.hkdf(mediaKey, 112, { info: utf8Encode(info) });
+  const iv = exp.subarray(0, 16);
+  const cipherKey = exp.subarray(16, 48);
+  const enc = postBody!.subarray(0, postBody!.length - 10);
+  return C.aesCbcDecrypt(cipherKey, iv, enc);
+}
+
+{
+  const media = createMediaLayer({ crypto: C, query, fetch: fetchOk });
+
+  const IMG = C.randomBytes(3333);
+  const im = (await media.buildImageMessage(IMG, { caption: "oi", width: 800, height: 600 }))
+    .imageMessage!;
+  ok("image: POST em /mms/image/", postUrl.includes("/mms/image/"));
+  ok("image: decifra de volta", eq(decryptBody(im.mediaKey!, "WhatsApp Image Keys"), IMG));
+  ok("image: caption / dimensões / mimetype", im.caption === "oi" && im.width === 800 && im.height === 600 && im.mimetype === "image/jpeg");
+  const imr = decodeE2EMessage(encodeE2EMessage({ imageMessage: im })).imageMessage!;
+  ok("image: codec roundtrip", imr.caption === "oi" && imr.width === 800 && eq(imr.fileEncSha256!, im.fileEncSha256!) && eq(imr.mediaKey!, im.mediaKey!));
+
+  const DOC = C.randomBytes(9000);
+  const dm = (await media.buildDocumentMessage(DOC, { fileName: "nota.pdf", mimetype: "application/pdf", pageCount: 3 }))
+    .documentMessage!;
+  ok("document: POST em /mms/document/", postUrl.includes("/mms/document/"));
+  ok("document: decifra de volta", eq(decryptBody(dm.mediaKey!, "WhatsApp Document Keys"), DOC));
+  ok("document: fileName vira title tbm", dm.fileName === "nota.pdf" && dm.title === "nota.pdf" && dm.pageCount === 3);
+  const dmr = decodeE2EMessage(encodeE2EMessage({ documentMessage: dm })).documentMessage!;
+  ok("document: codec roundtrip", dmr.fileName === "nota.pdf" && dmr.pageCount === 3 && dmr.mimetype === "application/pdf");
+
+  const VID = C.randomBytes(12000);
+  const vm = (await media.buildVideoMessage(VID, { caption: "clip", seconds: 8, gifPlayback: true }))
+    .videoMessage!;
+  ok("video: POST em /mms/video/", postUrl.includes("/mms/video/"));
+  ok("video: decifra de volta", eq(decryptBody(vm.mediaKey!, "WhatsApp Video Keys"), VID));
+  ok("video: caption / seconds / gifPlayback", vm.caption === "clip" && vm.seconds === 8 && vm.gifPlayback === true);
+  const vmr = decodeE2EMessage(encodeE2EMessage({ videoMessage: vm })).videoMessage!;
+  ok("video: codec roundtrip", vmr.caption === "clip" && vmr.seconds === 8 && vmr.gifPlayback === true);
+
+  const STK = C.randomBytes(2048);
+  const sm = (await media.buildStickerMessage(STK, { isAnimated: true, width: 512, height: 512 }))
+    .stickerMessage!;
+  ok("sticker: POST em /mms/image/ (tipo image)", postUrl.includes("/mms/image/"));
+  ok("sticker: decifra de volta", eq(decryptBody(sm.mediaKey!, "WhatsApp Image Keys"), STK));
+  ok("sticker: mimetype webp / isAnimated", sm.mimetype === "image/webp" && sm.isAnimated === true);
+  const smr = decodeE2EMessage(encodeE2EMessage({ stickerMessage: sm })).stickerMessage!;
+  ok("sticker: codec roundtrip", smr.isAnimated === true && smr.width === 512 && eq(smr.mediaKey!, sm.mediaKey!));
+}
+
 function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
   const out = new Uint8Array(a.length + b.length);
   out.set(a, 0);

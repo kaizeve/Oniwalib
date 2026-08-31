@@ -17,8 +17,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 // A mesma ordem de sempre. Editar aqui é editar a suíte.
 const FILES = [
   "version", "wire", "wabinary", "e2e-message", "noise", "auth", "file-state",
-  "socket", "signal", "sender-key", "prekeys", "messages", "media", "reaction",
-  "presence", "notifications", "bot", "pairing", "client",
+  "socket", "signal", "sender-key", "prekeys", "messages", "media", "profile",
+  "reaction", "presence", "notifications", "bot", "pairing", "client",
 ];
 
 const rts = process.argv.includes("--rts");
