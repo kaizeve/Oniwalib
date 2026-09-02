@@ -23,6 +23,13 @@ import {
   type StickerOptions,
 } from "./media";
 import { createProfileLayer, type ProfileLayer } from "./profile";
+import {
+  createPrivacyLayer,
+  type PrivacyLayer,
+  type PrivacyCategory,
+  type PrivacyValue,
+  type PrivacySettings,
+} from "./privacy";
 import { createPresenceLayer, type PresenceLayer } from "./presence";
 import { createNotificationsLayer, type NotificationsLayer } from "./notifications";
 import type { E2EMessage } from "./proto/e2e-message";
@@ -101,6 +108,11 @@ export interface OniConnection {
   removeProfilePicture(): Promise<void>;
   /** Define o seu recado / bio. */
   setBio(text: string): Promise<void>;
+  /** Lê as configurações de privacidade da conta (readreceipts, last, online,
+   *  profile, status, groupadd, calladd). */
+  fetchPrivacySettings(): Promise<PrivacySettings>;
+  /** Altera uma categoria de privacidade da conta. */
+  updatePrivacySetting(category: PrivacyCategory, value: PrivacyValue): Promise<PrivacySettings>;
   /** Reage a uma mensagem (`emoji` vazio remove a reação). Precisa de sessão. */
   sendReaction(jid: string, key: MessageKey, emoji: string): Promise<{ id: string }>;
   /** Anuncia a nossa presença. `available`/`unavailable` é global; `composing`/
@@ -244,6 +256,9 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
 
   // Perfil: foto e recado (bio). `<iq w:profile:picture>` / `<iq status>`.
   const profile: ProfileLayer = createProfileLayer({ query });
+
+  // Privacidade da conta (confirmações de leitura, visto por último, foto…).
+  const privacy: PrivacyLayer = createPrivacyLayer({ query });
 
   // Presença (online/digitando) e notificações de perfil (foto/recado). Só
   // fazem sentido depois do <success>; antes disso `send` lança.
@@ -596,6 +611,8 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     setProfilePicture: (jpeg) => profile.setProfilePicture(jpeg),
     removeProfilePicture: () => profile.removeProfilePicture(),
     setBio: (text) => profile.setBio(text),
+    fetchPrivacySettings: () => privacy.fetchPrivacySettings(),
+    updatePrivacySetting: (category, value) => privacy.updatePrivacySetting(category, value),
     sendReaction: (jid, key, emoji) => messages.sendReaction(jid, key, emoji),
     sendPresenceUpdate: (type, toJid) => presence.sendPresenceUpdate(type, toJid),
     sendTyping: (jid) => presence.sendPresenceUpdate("composing", jid),

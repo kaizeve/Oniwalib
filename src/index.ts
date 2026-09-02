@@ -87,6 +87,14 @@ export {
   type ProfileLayer,
   type ProfileLayerOptions,
 } from "./profile";
+export {
+  createPrivacyLayer,
+  type PrivacyLayer,
+  type PrivacyLayerOptions,
+  type PrivacyCategory,
+  type PrivacyValue,
+  type PrivacySettings,
+} from "./privacy";
 
 export {
   createPresenceLayer,
