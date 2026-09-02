@@ -36,7 +36,6 @@ import { openWhatsApp } from "../src/client";
 import { fileAuthState } from "../src/auth/file-state";
 import { OniBot, type IncomingMessage } from "../src/bot/bot";
 import { humanBytes } from "../src/bot/monitor";
-import { jidKind } from "../src/frame/jid";
 import { STOCK } from "../src/profiles/index";
 import { messageText } from "../src/proto/e2e-message";
 
@@ -240,33 +239,54 @@ bot.register("bio", "troca o recado/bio do bot (!bio <texto>)", async (args) => 
 // !status <texto>  → status de texto
 // !status <url de imagem/vídeo> [legenda]  → posta a mídia como status
 // Visível para quem mandou o comando (num teste real, passe a lista de contatos).
-bot.register("status", "posta um status: !status <texto>  ou  !status <url> [legenda]", async (args, msg) => {
+// `!status` é embutido no OniBot (cpu/ram/uptime). NÃO registrar aqui.
+
+// `!storys <texto>`  |  `!storys <url de img/vídeo> [legenda]`
+//   posta nos stories/status do WhatsApp do bot.
+// Quem vê: os JIDs em ONI_STORY_VIEWERS (números separados por vírgula) — sem
+// isso, só quem rodou o comando (a lista de contatos real precisa de app-state).
+const storyViewers = (msg: IncomingMessage): string[] => {
+  const env = (process.env.ONI_STORY_VIEWERS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((n) => (n.includes("@") ? n : `${n.replace(/\D/g, "")}@s.whatsapp.net`));
+  return env.length ? env : [msg.from];
+};
+
+const storysCmd = async (args: string, msg: IncomingMessage): Promise<string> => {
   const body = args.trim();
-  if (!body) return "uso: !status <texto>  |  !status <url de img/vídeo> [legenda]";
-  const kind = jidKind(msg.from);
-  if (kind !== "user" && kind !== "lid") {
-    return "rode o !status numa conversa 1:1 (preciso de um destinatário; num grupo/canal não dá)";
-  }
-  // Demo: o status fica visível só pra quem rodou o comando. Num bot real,
-  // passe a lista de contatos que devem ver.
-  const viewers = [msg.from];
+  if (!body) return "uso: !storys <texto>  |  !storys <url de img/vídeo> [legenda]";
+  const viewers = storyViewers(msg);
   try {
-    const isUrl = /^https?:\/\/\S+$/i.test(body.split(/\s+/)[0] ?? "");
-    if (!isUrl) {
+    const first = body.split(/\s+/)[0] ?? "";
+    if (!/^https?:\/\/\S+$/i.test(first)) {
       const r = await conn.postStatus(viewers, { text: body });
-      console.log(`→ status de texto p/ ${r.sentTo} viewer(s)`);
-      return `✅ status postado para ${r.sentTo} pessoa(s)`;
+      console.log(`→ story de texto p/ ${r.sentTo} viewer(s)`);
+      return `✅ story de texto postado (${r.sentTo} viewer(s))`;
     }
     const [url, ...rest] = body.split(/\s+/);
     const caption = rest.join(" ") || undefined;
     const { bytes, mime } = await grab(url!);
     const type = mime.startsWith("video/") ? "video" : "image";
     const r = await conn.postStatus(viewers, { media: bytes, type, caption });
-    console.log(`→ status ${type} (${humanBytes(bytes.length)}) p/ ${r.sentTo} viewer(s)`);
-    return `✅ status (${type}) postado para ${r.sentTo} pessoa(s)`;
+    console.log(`→ story ${type} (${humanBytes(bytes.length)}) p/ ${r.sentTo} viewer(s)`);
+    return `✅ story de ${type} postado (${r.sentTo} viewer(s))`;
   } catch (e) {
-    return `erro no !status: ${(e as Error).message}`;
+    return `erro no !storys: ${(e as Error).message}`;
   }
+};
+bot.register("storys", "posta nos stories: !storys <texto>  ou  !storys <url> [legenda]", storysCmd);
+bot.register("story", "alias de !storys", storysCmd);
+bot.register("stories", "alias de !storys", storysCmd);
+
+bot.register("nome", "troca o nome do perfil do bot (!nome <texto>)", async (args) => {
+  const name = args.trim();
+  if (!name) return "uso: !nome <texto>";
+  // O push name do WhatsApp MD é uma mutação de app-state (LT-hash), que a
+  // oniwalib ainda não tem. Foto (!foto) e recado (!bio) são <iq> simples e
+  // funcionam; o nome fica pra quando o app-state sync entrar.
+  return "trocar o nome do perfil ainda não dá (precisa de app-state sync). use !bio e !foto por enquanto.";
 });
 
 conn.events.on("connection.update", (u) => {
