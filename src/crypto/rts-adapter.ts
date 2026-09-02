@@ -113,9 +113,19 @@ export const rtsAdapter: Crypto = {
   // é interno ao RTS e não é exposto — assinar a mesma mensagem duas vezes dá
   // assinaturas diferentes, ambas válidas.
   sign(privateKey, message) {
+    if (typeof raw.xeddsaSign !== "function") {
+      throw new Error(
+        "oniwalib/rts: node:crypto.xeddsaSign ausente — binário do RTS anterior a UrubuCode/rts#2609; rebuild com XEdDSA",
+      );
+    }
     return u8(raw.xeddsaSign(privateKey, message));
   },
   verify(publicKey, message, signature) {
+    if (typeof raw.xeddsaVerify !== "function") {
+      throw new Error(
+        "oniwalib/rts: node:crypto.xeddsaVerify ausente — binário do RTS anterior a UrubuCode/rts#2609; rebuild com XEdDSA",
+      );
+    }
     return raw.xeddsaVerify(publicKey, message, signature);
   },
 };

@@ -1,12 +1,28 @@
-// Adapter de referência sobre `node:crypto`. Roda hoje em bun e node; no RTS
-// cobre randomBytes / sha256 / hmac / hkdf, e lança nos RTS-GAP até a Fase 0.
+// Adapter de referência sobre `node:crypto` + `curve25519-js`. Roda em bun e
+// node. É o adapter que o `detect()` do `index.ts` escolhe quando o runtime tem
+// `generateKeyPairSync` (KeyObjects); no RTS quem entra é o `rts-adapter.ts`.
 //
-// Este arquivo é o ÚNICO da lib que importa algo de plataforma. Trocar por
-// `rts-adapter.ts` não toca em mais nada.
+// Este arquivo é o ÚNICO da lib que importa algo de plataforma. `curve25519-js`
+// é carregado por `require` PREGUIÇOSO (não `import` de topo) de propósito: o RTS
+// não tem esse pacote e resolve o grafo de módulos estático inteiro no load —
+// um `import` de topo aqui derrubava `crypto/index.ts` e, em cascata, todo
+// módulo que encosta em cripto. Como no RTS o `detect()` nunca escolhe este
+// adapter, o `require` nunca roda lá.
 
 import nodeCrypto from "node:crypto";
-import * as curve25519 from "curve25519-js";
 import type { Crypto, KeyPair } from "./types";
+
+// `curve25519-js` — ref10 puro, mesma lib da Baileys. Só para XEdDSA
+// (generate/sign/verify); X25519 DH usa os KeyObjects do `node:crypto`.
+type Curve25519 = {
+  generateKeyPair(seed: Uint8Array): { public: Uint8Array; private: Uint8Array };
+  sign(priv: Uint8Array, msg: Uint8Array, rnd: Uint8Array): Uint8Array;
+  verify(pub: Uint8Array, msg: Uint8Array, sig: Uint8Array): boolean;
+};
+let _curve25519: Curve25519 | undefined;
+function curve25519(): Curve25519 {
+  return (_curve25519 ??= require("curve25519-js") as Curve25519);
+}
 
 const u8 = (b: Uint8Array | Buffer): Uint8Array => Uint8Array.from(b);
 
@@ -115,15 +131,15 @@ export const nodeAdapter: Crypto = {
   // (a chave de identidade é X25519, usada pra DH E pra assinar). `curve25519-js`
   // é a implementação ref10 pura, mesma que o libsignal.
   generateSigningKey(): KeyPair {
-    const kp = curve25519.generateKeyPair(u8(nodeCrypto.randomBytes(32)));
+    const kp = curve25519().generateKeyPair(u8(nodeCrypto.randomBytes(32)));
     return { publicKey: u8(kp.public), privateKey: u8(kp.private) };
   },
 
   sign(privateKey, message) {
-    return u8(curve25519.sign(privateKey, message, u8(nodeCrypto.randomBytes(64))));
+    return u8(curve25519().sign(privateKey, message, u8(nodeCrypto.randomBytes(64))));
   },
 
   verify(publicKey, message, signature) {
-    return curve25519.verify(publicKey, message, signature);
+    return curve25519().verify(publicKey, message, signature);
   },
 };
