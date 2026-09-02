@@ -33,6 +33,7 @@ const JID = "5511977776666:7@s.whatsapp.net";
 
 let connectorCalls = 0;
 let saveCredsCalls = 0;
+const sent2: any[] = [];
 let phase2Payload: Uint8Array | undefined;
 let replySeen: ReturnType<typeof getBinaryNodeChild> | undefined;
 
@@ -64,6 +65,7 @@ const connector = (): Promise<Transport> => {
       phase2Payload = server.clientPayload;
       server.pushNode(node("success", { lid: "111:7@lid" }));
     });
+    server.onReply((n) => sent2.push(n));
   }
   return Promise.resolve(clientT);
 };
@@ -117,6 +119,43 @@ if (phase2Payload) {
 } else {
   ok("capturou o payload da 2ª conexão", false);
 }
+
+// --- presença inicial + recibos de leitura / chatstate ----------------
+await new Promise((r) => setTimeout(r, 30)); // deixa o <presence available> sair
+ok(
+  "markOnlineOnConnect (default): mandou <presence type='available'>",
+  sent2.some((n) => n.tag === "presence" && n.attrs?.type === "available"),
+);
+
+conn.sendTyping(JID);
+conn.sendReceipt(JID, ["m1", "m2"], "read");
+conn.readMessages([
+  { remoteJid: "12345-67@g.us", id: "gm1", fromMe: false, participant: "5511000000000@s.whatsapp.net" },
+]);
+await new Promise((r) => setTimeout(r, 30));
+
+const typing = sent2.find((n) => n.tag === "chatstate" && n.attrs?.to === JID);
+ok(
+  "sendTyping → <chatstate to=jid><composing>",
+  !!typing && Array.isArray(typing.content) && typing.content[0]?.tag === "composing",
+);
+
+const rcpt = sent2.find((n) => n.tag === "receipt" && n.attrs?.type === "read" && n.attrs?.id === "m1");
+ok(
+  "sendReceipt read: 1º id no attr, resto em <list><item>",
+  !!rcpt &&
+    rcpt.attrs?.to === JID &&
+    Array.isArray(rcpt.content) &&
+    rcpt.content[0]?.tag === "list" &&
+    rcpt.content[0].content?.[0]?.attrs?.id === "m2",
+);
+
+const gr = sent2.find((n) => n.tag === "receipt" && n.attrs?.to === "12345-67@g.us");
+ok(
+  "readMessages: <receipt type=read participant> agrupado por chat",
+  !!gr && gr.attrs?.type === "read" && gr.attrs?.id === "gm1" &&
+    gr.attrs?.participant === "5511000000000@s.whatsapp.net",
+);
 
 conn.end();
 await new Promise((r) => setTimeout(r, 30));

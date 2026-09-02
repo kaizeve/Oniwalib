@@ -61,6 +61,14 @@ export interface OpenOptions {
   /** Cliente HTTP para upload de mídia. Default `globalThis.fetch`. Sem ele,
    *  `sendAudio` lança (o núcleo não assume um global de rede). */
   fetch?: FetchLike;
+  /** Anuncia `<presence type="available">` assim que loga — o telefone para
+   *  de te notificar das mensagens que o bot já viu. Default `true`, como na
+   *  Baileys (`markOnlineOnConnect`). Passe `false` para um bot "invisível". */
+  markOnlineOnConnect?: boolean;
+  /** Manda recibo de leitura (tick azul) automático em toda mensagem recebida
+   *  que vira `messages.upsert`. Default `false` — a Baileys também não manda
+   *  sozinha; use `conn.readMessages(...)` quando quiser marcar como lido. */
+  sendReadReceipts?: boolean;
   /** ms entre pings de keepalive. Default 25000. */
   keepAliveMs?: number;
   /** Máx. de reconexões automáticas seguidas antes de desistir. Default 5. */
@@ -98,8 +106,21 @@ export interface OniConnection {
   /** Anuncia a nossa presença. `available`/`unavailable` é global; `composing`/
    *  `recording`/`paused` é por chat e exige `toJid`. */
   sendPresenceUpdate(type: WAPresence, toJid?: string): void;
+  /** Atalhos por chat de `sendPresenceUpdate` — "digitando…", "gravando áudio…",
+   *  e parar. */
+  sendTyping(jid: string): void;
+  sendRecording(jid: string): void;
+  sendPaused(jid: string): void;
   /** Pede ao servidor a presença de `jid` (senão os `<presence>` dele não vêm). */
   subscribePresence(jid: string): void;
+  /** Marca mensagens como lidas (tick azul). Agrupa as `keys` por chat e manda
+   *  um `<receipt type="read">` por chat. */
+  readMessages(keys: MessageKey[]): void;
+  /** `<receipt>` cru para `ids` num `jid`. `type` omitido = recibo de entrega;
+   *  `"read"` = tick azul; `"read-self"` = marca lido sem revelar ao remetente
+   *  (quando a tua privacidade de "confirmações de leitura" está desligada).
+   *  `participant` só em grupo (quem mandou a mensagem). */
+  sendReceipt(jid: string, ids: string[], type?: "read" | "read-self", participant?: string): void;
   /** Fecha e não reconecta. */
   end(err?: Error): void;
   readonly state: "connecting" | "open" | "close";
@@ -234,6 +255,56 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
   });
   const notifications: NotificationsLayer = createNotificationsLayer({ events });
 
+  // Recibos de leitura (tick azul) e afins. `<receipt to=jid type=read
+  // id=id0 [participant=...]>` + `<list><item id=.../></list>` para os demais
+  // ids (formato da Baileys `sendReceipt`).
+  const sendReceipt = (
+    jid: string,
+    ids: string[],
+    type?: "read" | "read-self",
+    participant?: string,
+  ): void => {
+    if (ids.length === 0) return;
+    const attrs: Record<string, string> = { to: jid, id: ids[0]! };
+    if (type) attrs.type = type;
+    if (participant) attrs.participant = participant;
+    const extra = ids.slice(1);
+    const content =
+      extra.length > 0
+        ? [node("list", {}, extra.map((id) => node("item", { id })))]
+        : undefined;
+    try {
+      send(node("receipt", attrs, content));
+    } catch {
+      /* conexão caiu — ignora */
+    }
+  };
+
+  const readMessages = (keys: MessageKey[]): void => {
+    // agrupa por chat; em grupo, o `participant` é de quem mandou (todas as
+    // keys de um mesmo chat costumam ter o mesmo participant num lote).
+    const byChat = new Map<string, { ids: string[]; participant?: string }>();
+    for (const k of keys) {
+      if (!k.remoteJid || !k.id) continue;
+      let g = byChat.get(k.remoteJid);
+      if (!g) byChat.set(k.remoteJid, (g = { ids: [], participant: k.participant }));
+      g.ids.push(k.id);
+    }
+    for (const [jid, g] of byChat) sendReceipt(jid, g.ids, "read", g.participant);
+  };
+
+  // Recibo de leitura automático (opt-in). A Baileys não faz isto sozinha; aqui
+  // é um atalho para quem quer que TODA mensagem recebida já saia com tick azul.
+  if (opts.sendReadReceipts) {
+    events.on("messages.upsert", ({ type, messages: msgs }) => {
+      if (type !== "notify") return;
+      for (const m of msgs) {
+        if (m.key.fromMe || !m.message) continue;
+        sendReceipt(m.key.remoteJid, [m.key.id], "read", m.key.participant);
+      }
+    });
+  }
+
   // --- handlers de stanza --------------------------------------------
 
   const sendAck = (stanza: BinaryNode) => {
@@ -316,6 +387,16 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
       );
     } catch {
       /* segue mesmo assim */
+    }
+
+    // Presença inicial. `available` faz o telefone parar de notificar o que o
+    // bot já viu; desligue com `markOnlineOnConnect: false` para ficar invisível.
+    if (opts.markOnlineOnConnect ?? true) {
+      try {
+        presence.sendPresenceUpdate("available");
+      } catch {
+        /* segue mesmo assim */
+      }
     }
 
     keepAlive = setInterval(() => {
@@ -517,7 +598,12 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     setBio: (text) => profile.setBio(text),
     sendReaction: (jid, key, emoji) => messages.sendReaction(jid, key, emoji),
     sendPresenceUpdate: (type, toJid) => presence.sendPresenceUpdate(type, toJid),
+    sendTyping: (jid) => presence.sendPresenceUpdate("composing", jid),
+    sendRecording: (jid) => presence.sendPresenceUpdate("recording", jid),
+    sendPaused: (jid) => presence.sendPresenceUpdate("paused", jid),
     subscribePresence: (jid) => presence.subscribePresence(jid),
+    readMessages,
+    sendReceipt,
     end,
     get state() {
       return state;
