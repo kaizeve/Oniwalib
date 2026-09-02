@@ -58,6 +58,8 @@ export {
 export {
   generateOrGetPreKeys,
   buildPreKeyUploadNode,
+  buildPreKeyFetchNode,
+  parsePreKeyBundles,
   type PreKeyUpload,
   type PreKeyPair,
 } from "./prekeys";

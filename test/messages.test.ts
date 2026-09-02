@@ -19,6 +19,7 @@ import {
   initOutgoing,
   encrypt as sigEncrypt,
   decryptWhisperMessage,
+  decryptPreKeyWhisperMessage,
   type PreKeyBundle,
   type SignalDeps,
 } from "../src/signal/index";
@@ -284,6 +285,76 @@ upserts.length = 0;
   const sk2 = getBinaryNodeChildren(g2msg, "enc").find((e) => e.attrs.type === "skmsg");
   const clearG2 = decodeE2EMessage(unpad(groupDecrypt(C, botToUserRec, sk2!.content as Uint8Array)));
   ok("envio grupo: usuário decifra a 2ª (mesma cadeia)", clearG2.conversation === "segunda");
+}
+
+// --- cold-send: sem sessão + query → busca bundle, abre X3DH, manda pkmsg ---
+{
+  const coldAuth = memoryAuthState();
+  coldAuth.creds.me = { id: "5511777770000@s.whatsapp.net" };
+  const coldSent: BinaryNode[] = [];
+  let fetchAsked: BinaryNode | undefined;
+
+  // "parte remota" com quem o cold bot nunca falou
+  const remoteAuth = memoryAuthState();
+  const remoteDeps: SignalDeps = { c: C, curve: makeCurve(C), storage: makeSignalStorage(remoteAuth) };
+  const remoteOtk = C.generateX25519();
+  const REMOTE = "5511555554444@s.whatsapp.net";
+
+  const query = async (n: BinaryNode): Promise<BinaryNode> => {
+    fetchAsked = n;
+    // responde o <iq xmlns=encrypt> com o bundle da parte remota (device 0)
+    const be = (x: number, len: number) => {
+      const a = new Uint8Array(len);
+      let r = x;
+      for (let i = len - 1; i >= 0; i--) { a[i] = r & 0xff; r = Math.floor(r / 256); }
+      return a;
+    };
+    return node("iq", { type: "result", id: n.attrs.id ?? "1" }, [
+      node("list", {}, [
+        node("user", { jid: REMOTE }, [
+          node("registration", {}, be(remoteAuth.creds.registrationId, 4)),
+          node("type", {}, Uint8Array.from([5])),
+          node("identity", {}, remoteAuth.creds.signedIdentityKey.publicKey),
+          node("skey", {}, [
+            node("id", {}, be(remoteAuth.creds.signedPreKey.keyId, 3)),
+            node("value", {}, remoteAuth.creds.signedPreKey.keyPair.publicKey),
+            node("signature", {}, remoteAuth.creds.signedPreKey.signature),
+          ]),
+          node("key", {}, [node("id", {}, be(4141, 3)), node("value", {}, remoteOtk.publicKey)]),
+        ]),
+      ]),
+    ]);
+  };
+  await remoteAuth.keys.set({ "pre-key": { "4141": { public: remoteOtk.publicKey, private: remoteOtk.privateKey } } });
+
+  const coldLayer = createMessagesLayer({
+    events: new Emitter(),
+    auth: coldAuth,
+    crypto: C,
+    sendNode: (n) => coldSent.push(n),
+    genId: (() => { let i = 0; return () => `cold-${i++}`; })(),
+    query,
+  });
+
+  const left = await coldLayer.assertSessions([REMOTE]);
+  ok("cold-send: assertSessions abriu a sessão (nada sobrou)", left.length === 0, JSON.stringify(left));
+  ok("cold-send: perguntou <iq xmlns=encrypt> get", fetchAsked?.attrs.xmlns === "encrypt" && fetchAsked?.attrs.type === "get");
+
+  await coldLayer.sendText(REMOTE, "oi, primeira vez");
+  const coldMsg = coldSent.find((n) => n.tag === "message");
+  const enc = getBinaryNodeChildren(coldMsg, "enc")[0];
+  ok("cold-send: mandou <message><enc type=pkmsg>", enc?.attrs.type === "pkmsg");
+
+  // a parte remota decifra o pkmsg → prova que o X3DH fechou dos dois lados
+  const clear = decodeE2EMessage(
+    unpad(await decryptPreKeyWhisperMessage(remoteDeps, coldAddr(coldAuth), enc!.content as Uint8Array)),
+  );
+  ok("cold-send: parte remota decifra o texto", clear.conversation === "oi, primeira vez", JSON.stringify(clear));
+}
+
+function coldAddr(a: ReturnType<typeof memoryAuthState>): string {
+  const u = a.creds.me!.id.split("@")[0]!.split(":")[0];
+  return `${u}.0`;
 }
 
 const rt =

@@ -37,9 +37,10 @@ import {
   encrypt as signalEncrypt,
   decryptWhisperMessage,
   decryptPreKeyWhisperMessage,
+  initOutgoing,
   type SignalDeps,
 } from "./signal/index";
-import { buildPreKeyUploadNode } from "./signal/prekeys";
+import { buildPreKeyUploadNode, buildPreKeyFetchNode, parsePreKeyBundles } from "./signal/prekeys";
 import {
   SenderKeyRecord,
   processSenderKeyDistribution,
@@ -63,6 +64,10 @@ export interface MessagesLayerOptions {
   sendNode: (n: BinaryNode) => void;
   /** Gera um id de stanza único. */
   genId: () => string;
+  /** Faz um `<iq>` e resolve no `<iq type=result>` de mesmo id. Sem isto,
+   *  `assertSessions` (cold-send) não funciona — só dá pra responder quem já
+   *  mandou mensagem. */
+  query?: (n: BinaryNode, timeoutMs?: number) => Promise<BinaryNode>;
   /** Persiste `auth.creds` (após upload de pré-chaves). */
   saveCreds?: () => void | Promise<void>;
 }
@@ -72,6 +77,10 @@ export interface MessagesLayer {
   sendText(jid: string, text: string): Promise<{ id: string }>;
   /** Cifra e envia um `Message` qualquer (texto, botões, lista, …). */
   sendMessage(jid: string, msg: E2EMessage): Promise<{ id: string }>;
+  /** Garante que há sessão pairwise com cada `jid` (com device): para os que
+   *  faltam, busca o bundle (`<iq xmlns="encrypt">`) e roda o X3DH. Precisa de
+   *  `query`. Devolve os jids que ficaram SEM sessão (device fora do ar etc.). */
+  assertSessions(jids: string[]): Promise<string[]>;
   /** Reage a uma mensagem. `emoji` vazio (`""`) remove a reação. */
   sendReaction(jid: string, key: MessageKey, emoji: string): Promise<{ id: string }>;
   uploadPreKeys(range?: number): Promise<void>;
@@ -82,7 +91,7 @@ export interface MessagesLayer {
 const PREKEY_UPLOAD_COUNT = 30;
 
 export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
-  const { events, auth, crypto: c, sendNode, genId } = opts;
+  const { events, auth, crypto: c, sendNode, genId, query } = opts;
   const deps: SignalDeps = {
     c,
     curve: makeCurve(c),
@@ -422,15 +431,75 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     });
   }
 
+  // Cold-send: abre sessão pairwise com quem nunca falou conosco. Para cada jid
+  // (com device) sem sessão, busca o bundle e roda o X3DH. Devolve os que ainda
+  // ficaram sem sessão (bundle indisponível / device fora do ar).
+  async function assertSessions(jids: string[]): Promise<string[]> {
+    const safeAddr = (jid: string): string | undefined => {
+      try {
+        return signalAddress(jid);
+      } catch {
+        return undefined;
+      }
+    };
+
+    const missing: string[] = [];
+    for (const jid of jids) {
+      const addr = safeAddr(jid);
+      if (!addr) continue;
+      const s = await deps.storage.loadSession(addr);
+      if (!s || !s.getOpenSession()) missing.push(jid);
+    }
+    if (missing.length === 0) return [];
+    if (!query) {
+      throw new Error("assertSessions: sem `query` configurada — não dá para buscar o bundle de pré-chaves");
+    }
+
+    const res = await query(buildPreKeyFetchNode(missing));
+    const parsed = parsePreKeyBundles(res);
+    const byAddr = new Map<string, (typeof parsed)[string]>();
+    for (const [bjid, bundle] of Object.entries(parsed)) {
+      const a = safeAddr(bjid);
+      if (a) byAddr.set(a, bundle);
+    }
+
+    const stillMissing: string[] = [];
+    for (const jid of missing) {
+      const addr = safeAddr(jid)!;
+      const bundle = byAddr.get(addr);
+      if (!bundle) {
+        stillMissing.push(jid);
+        continue;
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await serial(async () => {
+        try {
+          await initOutgoing(deps, addr, bundle);
+        } catch (e) {
+          stillMissing.push(jid);
+          // eslint-disable-next-line no-console
+          console.error(`messages: X3DH com ${jid} falhou:`, (e as Error).message);
+        }
+      });
+    }
+    return stillMissing;
+  }
+
   async function sendMessage(jid: string, msg: E2EMessage): Promise<{ id: string }> {
     if (isJidGroup(jid)) return sendGroupMessage(jid, msg);
+
+    const addr = signalAddress(jid);
+    const pre = await deps.storage.loadSession(addr);
+    if ((!pre || !pre.getOpenSession()) && query) {
+      await assertSessions([jid]);
+    }
+
     return serial(async () => {
-      const addr = signalAddress(jid);
       const existing = await deps.storage.loadSession(addr);
       if (!existing || !existing.getOpenSession()) {
         throw new Error(
-          `sendMessage: sem sessão com ${jid}. Na fase 1 dá para responder quem já ` +
-            `mandou mensagem; cold-send (buscar bundle) é fase 2.`,
+          `sendMessage: sem sessão com ${jid} e não consegui abrir uma` +
+            (query ? " (bundle de pré-chaves indisponível)" : " (sem `query` para cold-send)"),
         );
       }
 
@@ -588,6 +657,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     handleMessageStanza,
     sendText,
     sendMessage,
+    assertSessions,
     sendReaction,
     uploadPreKeys,
     onEncryptNotification,

@@ -9,7 +9,7 @@ It talks the socket directly — no browser, no Puppeteer, no headless Chrome.
 
 <br>
 
-[![tests](https://img.shields.io/badge/tests-489%2F489%20passing-2ea44f?style=flat-square)](#tests)
+[![tests](https://img.shields.io/badge/tests-501%2F501%20passing-2ea44f?style=flat-square)](#tests)
 [![runtimes](https://img.shields.io/badge/runs%20on-bun%20%C2%B7%20node%20%C2%B7%20RTS-0b7285?style=flat-square)](#status)
 [![language](https://img.shields.io/badge/TypeScript-3178c6?style=flat-square&logo=typescript&logoColor=white)](#)
 [![status](https://img.shields.io/badge/status-early%20%C2%B7%20foundation-d9822b?style=flat-square)](#status)
@@ -98,7 +98,7 @@ the single point that still depends on the engine.
 
 ## Status
 
-`oniwalib` runs on **bun / node** and on **RTS**: 489/489 on bun, **466 on RTS**
+`oniwalib` runs on **bun / node** and on **RTS**: 501/501 on bun, **478 on RTS**
 (the one red is `auth/file-state.ts`, the node-only persistence file — see below).
 
 | Module | What it does | bun / node | RTS |
@@ -110,7 +110,7 @@ the single point that still depends on the engine.
 | `auth/` | credentials + Signal key store + signal identities | ✅ | ✅ |
 | `pairing.ts` | `configureSuccessfulPairing` — the `<pair-success>` crypto (HMAC + account/device signatures) | ✅ | ✅ |
 | `signal/` | native Double Ratchet + X3DH (1:1) **+ SenderKey group cipher (read)**, own session/sender-key records, pre-key upload — studied from libsignal, imports nothing | ✅ | ✅ |
-| `messages.ts` | decrypt `<message><enc>` (`pkmsg`/`msg` **and `skmsg` — group read**) → `messages.upsert`; `sendText` / `sendMessage` (1:1 reply); **reactions (`messages.reaction` + `sendReaction`)**; **"delete for everyone" (`messages.delete`)**; pre-keys after `<success>` | ✅ | ✅ |
+| `messages.ts` | decrypt `<message><enc>` (`pkmsg`/`msg` **and `skmsg` — group read**) → `messages.upsert`; `sendText` / `sendMessage` (1:1) **with cold-send — `assertSessions` fetches the pre-key bundle for a number you've never messaged**; **reactions (`messages.reaction` + `sendReaction`)**; **"delete for everyone" (`messages.delete`)**; pre-keys after `<success>` | ✅ | ✅ |
 | `presence.ts` | `<presence>` / `<chatstate>` → `presence.update` (online, last seen, typing, recording); `sendPresenceUpdate` / `subscribePresence` | ✅ | ✅ |
 | `notifications.ts` | `<notification>` for profile picture / status (bio) → `contacts.update` | ✅ | ✅ |
 | `client.ts` | `openWhatsApp` — QR + pairing + `515` restart + login + keepalive/acks + message / presence / notification pipeline | ✅ | ✅¹ |
@@ -164,8 +164,8 @@ subscribe) · `notifications` 10 (profile picture / bio → `contacts.update`) �
 Plus the Signal layer and everything bun-only for now: `signal` 13 (X3DH,
 Double Ratchet, re-key, out-of-order, MAC rejection — two in-memory parties, no
 server) · `sender-key` 17 (group cipher: SKDM distribution, in/out-of-order
-decrypt, replay + bad-signature rejection, serialization) · `prekeys` 18 ·
-`messages` 34 (incoming `pkmsg` → `messages.upsert` → `sendText`/`sendMessage`
+decrypt, replay + bad-signature rejection, serialization) · `prekeys` 26 ·
+`messages` 38 (incoming `pkmsg` → `messages.upsert` → `sendText`/`sendMessage`
 reply decrypted back; group read: standalone SKDM → `skmsg` → text; retry
 receipt with the full `<keys>` block on a decrypt miss) · `media` 52 (audio /
 image / video / document / sticker send: per-type HKDF → AES-CBC + 10-byte MAC,
@@ -179,7 +179,7 @@ normalization, dedup) · `reaction` 19
 revoke → `messages.delete`; `sendReaction` encrypted back) · `pairing` 18 (the
 `<pair-success>` crypto both directions) ·
 `client` 18 (QR → pairing → `515` restart → login `<success>`, over the mock
-server) → **489 / 489 on bun**.
+server) → **501 / 501 on bun**.
 
 ### <a name="oni-version"></a>Keeping it working — the oni-version
 

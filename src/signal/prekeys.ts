@@ -7,7 +7,8 @@
 
 import type { AuthCreds, AuthenticationState } from "../auth/state";
 import type { Crypto } from "../crypto/types";
-import { node, type BinaryNode } from "../frame/node";
+import { getBinaryNodeChild, getBinaryNodeChildren, node, type BinaryNode } from "../frame/node";
+import type { PreKeyBundle } from "./session-builder";
 
 const KEY_BUNDLE_TYPE = Uint8Array.from([5]);
 const S_WHATSAPP_NET = "@s.whatsapp.net";
@@ -110,4 +111,85 @@ export async function buildPreKeyUploadNode(
   ]);
 
   return { node: iq, update, count: keyNodes.length };
+}
+
+// --- fetch (cold-send) -------------------------------------------------
+// Buscar o bundle de pré-chaves de devices com quem nunca conversamos, para
+// abrir a sessão pairwise sem esperar eles mandarem primeiro. Espelha o
+// `<iq xmlns="encrypt">` de get + `parseAndInjectE2ESessions` da Baileys.
+//
+//   <iq to="s.whatsapp.net" type="get" xmlns="encrypt">
+//     <key><user jid="55...:23@s.whatsapp.net"/> … </key>
+//   </iq>
+//   → <list><user jid=…>
+//        <registration/> (4B BE)  <type/> (1B)  <identity/> (32B)
+//        <skey><id/> (3B BE) <value/> (32B) <signature/> (64B)</skey>
+//        <key><id/> (3B BE) <value/> (32B)</key>   (one-time, opcional)
+//     </user></list>
+
+const DJB = 5;
+
+function beNum(v: Uint8Array): number {
+  let n = 0;
+  for (const b of v) n = n * 256 + b;
+  return n;
+}
+function prefix(pub: Uint8Array): Uint8Array {
+  if (pub.length === 33) return pub;
+  const out = new Uint8Array(33);
+  out[0] = DJB;
+  out.set(pub, 1);
+  return out;
+}
+
+/** `<iq xmlns="encrypt">` de get para os `jids` (já com device, ex. `55..:23@..`). */
+export function buildPreKeyFetchNode(jids: string[]): BinaryNode {
+  return node("iq", { xmlns: "encrypt", type: "get", to: S_WHATSAPP_NET }, [
+    node(
+      "key",
+      {},
+      jids.map((jid) => node("user", { jid })),
+    ),
+  ]);
+}
+
+/** Parseia o `<iq type=result>` de `buildPreKeyFetchNode` em bundles por jid.
+ *  Um `<user>` com `<error>` (device fora do ar) sai de fora. */
+export function parsePreKeyBundles(iqResult: BinaryNode): Record<string, PreKeyBundle> {
+  const list = getBinaryNodeChild(iqResult, "list") ?? iqResult;
+  const out: Record<string, PreKeyBundle> = {};
+  for (const user of getBinaryNodeChildren(list, "user")) {
+    const jid = user.attrs.jid;
+    if (!jid || getBinaryNodeChild(user, "error")) continue;
+
+    const reg = getBinaryNodeChild(user, "registration");
+    const ident = getBinaryNodeChild(user, "identity");
+    const skey = getBinaryNodeChild(user, "skey");
+    if (!ident?.content || !skey) continue;
+
+    const skId = getBinaryNodeChild(skey, "id");
+    const skVal = getBinaryNodeChild(skey, "value");
+    const skSig = getBinaryNodeChild(skey, "signature");
+    if (!skId?.content || !skVal?.content || !skSig?.content) continue;
+
+    const bundle: PreKeyBundle = {
+      registrationId: reg?.content instanceof Uint8Array ? beNum(reg.content) : 0,
+      identityKey: prefix(asBytes(ident.content)),
+      signedPreKey: {
+        keyId: beNum(asBytes(skId.content)),
+        publicKey: prefix(asBytes(skVal.content)),
+        signature: asBytes(skSig.content),
+      },
+    };
+
+    const otk = getBinaryNodeChild(user, "key");
+    const otkId = getBinaryNodeChild(otk, "id");
+    const otkVal = getBinaryNodeChild(otk, "value");
+    if (otkId?.content && otkVal?.content) {
+      bundle.preKey = { keyId: beNum(asBytes(otkId.content)), publicKey: prefix(asBytes(otkVal.content)) };
+    }
+
+    out[jid] = bundle;
+  }
+  return out;
 }

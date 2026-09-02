@@ -96,6 +96,11 @@ export interface OniConnection {
   sendText(jid: string, text: string): Promise<{ id: string }>;
   /** Como `sendText`, mas com um `Message` inteiro — botões, lista, viewOnce… */
   sendMessage(jid: string, msg: E2EMessage): Promise<{ id: string }>;
+  /** Abre sessão Signal com `jids` que ainda não têm uma (busca o bundle de
+   *  pré-chaves e roda o X3DH). `sendText`/`sendMessage` 1:1 já chamam isto
+   *  sozinhos; use direto para pré-aquecer. Devolve os jids que ficaram sem
+   *  sessão. */
+  assertSessions(jids: string[]): Promise<string[]>;
   /** Cifra + sobe um anexo ao servidor de mídia e envia (1:1 ou grupo). Precisa
    *  de `fetch` (default `globalThis.fetch`) e de sessão Signal com `jid`. */
   sendAudio(jid: string, data: Uint8Array, opts?: AudioOptions): Promise<{ id: string }>;
@@ -246,6 +251,7 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     crypto: c,
     sendNode: send,
     genId,
+    query,
     saveCreds: opts.saveCreds,
   });
   let preKeysUploaded = false;
@@ -608,6 +614,7 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     sendNode: send,
     sendText: (jid, text) => messages.sendText(jid, text),
     sendMessage: (jid, msg) => messages.sendMessage(jid, msg),
+    assertSessions: (jids) => messages.assertSessions(jids),
     sendAudio: async (jid, data, o2) => messages.sendMessage(jid, await media.buildAudioMessage(data, o2)),
     sendImage: async (jid, data, o2) => messages.sendMessage(jid, await media.buildImageMessage(data, o2)),
     sendVideo: async (jid, data, o2) => messages.sendMessage(jid, await media.buildVideoMessage(data, o2)),
