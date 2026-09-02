@@ -501,14 +501,15 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
       }
     }, keepAliveMs);
 
-    // Sobe pré-chaves uma vez por processo (o servidor repõe via
-    // <notification type="encrypt">). Fase 1: sem query proativa de <count>.
+    // Repõe pré-chaves uma vez por processo — mas SÓ se o servidor de fato
+    // estiver baixo (`onEncryptNotification` pergunta o `<count>` antes e tem
+    // rate-limit). Sem isso, cada restart subia 30 e o `auth.owl` inchava.
     if (!preKeysUploaded) {
       preKeysUploaded = true;
-      void messages.uploadPreKeys().catch((e) => {
+      void messages.onEncryptNotification().catch((e) => {
         preKeysUploaded = false;
         // eslint-disable-next-line no-console
-        console.error("client: upload de pré-chaves falhou:", (e as Error).message);
+        console.error("client: reposição de pré-chaves falhou:", (e as Error).message);
       });
     }
 
