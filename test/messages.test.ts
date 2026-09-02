@@ -461,6 +461,43 @@ function bundleIq(remote: ReturnType<typeof memoryAuthState>, jid: string, otkPu
   ok("status: lista vazia lança", threw.includes("destinatários"), threw);
 }
 
+// --- onEncryptNotification NÃO faz loop de upload de pré-chave -------------
+{
+  const pkAuth = memoryAuthState();
+  pkAuth.creds.me = { id: "5511444440000@s.whatsapp.net" };
+  const pkSent: BinaryNode[] = [];
+  let countValue = "50";
+  const query = async (n: BinaryNode): Promise<BinaryNode> => {
+    if (getBinaryNodeChild(n, "count")) {
+      return node("iq", { type: "result", id: n.attrs.id ?? "1" }, [node("count", { value: countValue })]);
+    }
+    return node("iq", { type: "result", id: n.attrs.id ?? "1" });
+  };
+  const pkLayer = createMessagesLayer({
+    events: new Emitter(), auth: pkAuth, crypto: C,
+    sendNode: (x) => pkSent.push(x),
+    genId: (() => { let i = 0; return () => `pk-${i++}`; })(),
+    query,
+  });
+
+  const upserts0 = pkSent.length;
+  // servidor ainda tem 50 pré-chaves → não sobe nada
+  await pkLayer.onEncryptNotification();
+  ok("encrypt-notif: count alto → NÃO sobe pré-chave", !pkSent.some((n) => n.tag === "iq" && n.attrs.xmlns === "encrypt" && n.attrs.type === "set"));
+
+  // agora o servidor diz que só tem 3 → sobe UMA vez
+  countValue = "3";
+  await pkLayer.onEncryptNotification();
+  const uploads1 = pkSent.filter((n) => n.tag === "iq" && n.attrs.xmlns === "encrypt" && n.attrs.type === "set").length;
+  ok("encrypt-notif: count baixo → sobe pré-chave", uploads1 === 1);
+
+  // segunda notificação logo em seguida → rate-limit, NÃO sobe de novo
+  await pkLayer.onEncryptNotification();
+  const uploads2 = pkSent.filter((n) => n.tag === "iq" && n.attrs.xmlns === "encrypt" && n.attrs.type === "set").length;
+  ok("encrypt-notif: 2ª em seguida → rate-limit (sem 2º upload)", uploads2 === 1);
+  void upserts0;
+}
+
 const rt =
   typeof (globalThis as any).Bun !== "undefined"
     ? "bun"

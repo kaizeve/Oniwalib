@@ -96,7 +96,14 @@ export interface MessagesLayer {
   onEncryptNotification(): Promise<void>;
 }
 
+const S_WHATSAPP_NET = "@s.whatsapp.net";
 const PREKEY_UPLOAD_COUNT = 30;
+/** Se o servidor ainda tem pelo menos isto de pré-chave, não sobe mais. */
+const PREKEY_LOW_WATERMARK = 10;
+/** Intervalo mínimo entre uploads disparados por `<notification type=encrypt>`.
+ *  Sem isto, uma tempestade de notificações incha o `auth.owl` (ids nas milhares)
+ *  e trava o bot — foi o bug que derrubou o oni-bot em 2026-09-02. */
+const PREKEY_UPLOAD_MIN_INTERVAL_MS = 10 * 60 * 1000;
 
 export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
   const { events, auth, crypto: c, sendNode, genId, query, groupDevices } = opts;
@@ -759,19 +766,45 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     });
   }
 
+  let lastPreKeyUpload = 0;
+
   async function uploadPreKeys(range = PREKEY_UPLOAD_COUNT): Promise<void> {
     return serial(async () => {
       const { node: iq, update, count } = await buildPreKeyUploadNode(auth, range, c);
       Object.assign(auth.creds, update);
       iq.attrs.id = genId();
       sendNode(iq);
+      lastPreKeyUpload = Date.now();
       await opts.saveCreds?.();
       // eslint-disable-next-line no-console
       console.log(`messages: ${count} pré-chaves enviadas (próxima id ${auth.creds.nextPreKeyId})`);
     });
   }
 
+  /** `<iq get xmlns=encrypt><count/></iq>` → quantas pré-chaves 1:1 o servidor
+   *  ainda tem nossas. `undefined` se não deu pra perguntar. */
+  async function queryPreKeyCount(): Promise<number | undefined> {
+    if (!query) return undefined;
+    try {
+      const res = await query(
+        node("iq", { to: S_WHATSAPP_NET, type: "get", xmlns: "encrypt" }, [node("count", {})]),
+      );
+      const cnt = getBinaryNodeChild(res, "count");
+      const v = cnt?.attrs.value ?? res.attrs.value;
+      const n = v === undefined ? NaN : Number(v);
+      return Number.isFinite(n) ? n : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  // Servidor avisou que o estoque baixou. NÃO sobe cegamente — isso era um loop:
+  // pergunta o `<count>` primeiro e respeita um intervalo mínimo. Só repõe se
+  // de fato está baixo.
   async function onEncryptNotification(): Promise<void> {
+    if (Date.now() - lastPreKeyUpload < PREKEY_UPLOAD_MIN_INTERVAL_MS) return;
+    const remaining = await queryPreKeyCount();
+    if (remaining !== undefined && remaining >= PREKEY_LOW_WATERMARK) return;
     await uploadPreKeys();
   }
 

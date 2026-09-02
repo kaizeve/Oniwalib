@@ -14,7 +14,8 @@
     "bot:restart": "npx --yes pm2 restart oni-bot --update-env",
     "bot:down": "npx --yes pm2 delete oni-bot",
     "bot:logs": "npx --yes pm2 logs oni-bot --lines 50",
-    "bot:status": "npx --yes pm2 status"
+    "bot:status": "npx --yes pm2 status",
+    "reviveqr": "node scripts/reviveqr.mjs"
   },
   "author": "loveless",
   "license": "SEE LICENSE IN LICENSE",
