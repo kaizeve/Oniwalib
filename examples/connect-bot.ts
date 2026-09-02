@@ -245,13 +245,18 @@ bot.register("bio", "troca o recado/bio do bot (!bio <texto>)", async (args) => 
 //   posta nos stories/status do WhatsApp do bot.
 // Quem vê: os JIDs em ONI_STORY_VIEWERS (números separados por vírgula) — sem
 // isso, só quem rodou o comando (a lista de contatos real precisa de app-state).
+// Toda vez que alguém manda mensagem 1:1 pro bot, o jid entra aqui. É a
+// "audiência" que o bot conhece (o app-state sync com a agenda de verdade é a
+// próxima fase). `ONI_STORY_VIEWERS` (números por vírgula) força uma lista fixa.
+const seenDmContacts = new Set<string>();
 const storyViewers = (msg: IncomingMessage): string[] => {
   const env = (process.env.ONI_STORY_VIEWERS ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean)
     .map((n) => (n.includes("@") ? n : `${n.replace(/\D/g, "")}@s.whatsapp.net`));
-  return env.length ? env : [msg.from];
+  const all = new Set<string>([...env, ...seenDmContacts, msg.from]);
+  return [...all];
 };
 
 const storysCmd = async (args: string, msg: IncomingMessage): Promise<string> => {
@@ -276,7 +281,11 @@ const storysCmd = async (args: string, msg: IncomingMessage): Promise<string> =>
     return `erro no !storys: ${(e as Error).message}`;
   }
 };
-bot.register("storys", "posta nos stories: !storys <texto>  ou  !storys <url> [legenda]", storysCmd);
+bot.register(
+  "storys",
+  "posta nos stories: !storys <texto> ou !storys <url> [legenda] (vê quem já falou com o bot ou ONI_STORY_VIEWERS)",
+  storysCmd,
+);
 bot.register("story", "alias de !storys", storysCmd);
 bot.register("stories", "alias de !storys", storysCmd);
 
@@ -316,6 +325,10 @@ conn.events.on("messages.upsert", ({ messages }) => {
     if (!text) continue;
     const from = m.key.remoteJid;
     const inGroup = from.endsWith("@g.us");
+    // conversa 1:1 → esse contato pode ver os stories do bot
+    if (!inGroup && (from.endsWith("@s.whatsapp.net") || from.endsWith("@lid"))) {
+      seenDmContacts.add(from);
+    }
     console.log(`← ${inGroup ? `[grupo ${from}] ` : ""}${m.pushName ?? from}: ${text}`);
 
     // Grupo: respondemos com sender key (skmsg) + distribuição do NOSSO SKDM
