@@ -25,7 +25,8 @@ import {
 import { utf8Encode } from "../frame/buffer";
 import type { E2EMessage } from "../proto/e2e-message";
 
-/** Subconjunto do `fetch` que a camada usa. `globalThis.fetch` satisfaz. */
+/** Subconjunto do `fetch` que a camada usa. `globalThis.fetch` satisfaz.
+ *  `arrayBuffer` só é exercido no download de mídia recebida. */
 export type FetchLike = (
   url: string,
   init?: {
@@ -33,7 +34,12 @@ export type FetchLike = (
     headers?: Record<string, string>;
     body?: Uint8Array;
   },
-) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
+) => Promise<{
+  ok: boolean;
+  status: number;
+  text(): Promise<string>;
+  arrayBuffer?(): Promise<ArrayBuffer>;
+}>;
 
 export type MediaType = "image" | "video" | "audio" | "document" | "sticker";
 
@@ -111,12 +117,23 @@ export interface StickerOptions {
   isAnimated?: boolean;
 }
 
+/** Anexo recebido, já decifrado e verificado. */
+export interface DownloadedMedia {
+  data: Uint8Array;
+  type: MediaType;
+  mimetype?: string;
+}
+
 export interface MediaLayer {
   buildAudioMessage(data: Uint8Array, opts?: AudioOptions): Promise<E2EMessage>;
   buildImageMessage(data: Uint8Array, opts?: ImageOptions): Promise<E2EMessage>;
   buildVideoMessage(data: Uint8Array, opts?: VideoOptions): Promise<E2EMessage>;
   buildDocumentMessage(data: Uint8Array, opts?: DocumentOptions): Promise<E2EMessage>;
   buildStickerMessage(data: Uint8Array, opts?: StickerOptions): Promise<E2EMessage>;
+  /** Baixa + decifra + verifica (MAC de 10 bytes, e `fileSha256` se veio) o
+   *  anexo de uma mensagem recebida (`imageMessage` / `videoMessage` /
+   *  `audioMessage` / `documentMessage` / `stickerMessage`). */
+  downloadMedia(msg: E2EMessage): Promise<DownloadedMedia>;
 }
 
 const S_WHATSAPP_NET = "@s.whatsapp.net";
@@ -290,13 +307,90 @@ export function createMediaLayer(o: MediaLayerOptions): MediaLayer {
     };
   }
 
+  async function downloadMedia(msg: E2EMessage): Promise<DownloadedMedia> {
+    const picked = pickMedia(msg);
+    if (!picked) throw new Error("media: a mensagem não tem anexo baixável");
+    const { type, m } = picked;
+
+    if (!m.mediaKey || m.mediaKey.length !== 32) {
+      throw new Error(`media: ${type} sem mediaKey de 32 bytes`);
+    }
+    const url =
+      m.url && /^https?:\/\//i.test(m.url)
+        ? m.url
+        : m.directPath
+          ? `https://mmg.whatsapp.net${m.directPath}`
+          : undefined;
+    if (!url) throw new Error(`media: ${type} sem url nem directPath`);
+
+    const fetchImpl = o.fetch;
+    if (!fetchImpl) {
+      throw new Error("media: sem `fetch` — passe `fetch` em openWhatsApp para baixar mídia");
+    }
+    const res = await fetchImpl(url, { headers: { Origin: ORIGIN, Referer: `${ORIGIN}/` } });
+    if (!res.ok) throw new Error(`media: GET ${url} → HTTP ${res.status}`);
+    if (typeof res.arrayBuffer !== "function") {
+      throw new Error("media: a implementação de `fetch` não expõe arrayBuffer()");
+    }
+    const body = new Uint8Array(await res.arrayBuffer());
+    if (body.length <= 10) throw new Error("media: corpo cifrado curto demais");
+
+    const enc = body.subarray(0, body.length - 10);
+    const mac = body.subarray(body.length - 10);
+
+    const expanded = c.hkdf(m.mediaKey, 112, { info: utf8Encode(HKDF_INFO[type]) });
+    const iv = expanded.subarray(0, 16);
+    const cipherKey = expanded.subarray(16, 48);
+    const macKey = expanded.subarray(48, 80);
+
+    if (!bytesEqual(c.hmacSha256(macKey, concat(iv, enc)).subarray(0, 10), mac)) {
+      throw new Error("media: MAC não confere (mediaKey errada ou download corrompido)");
+    }
+
+    const data = c.aesCbcDecrypt(cipherKey, iv, enc);
+    if (m.fileSha256 && m.fileSha256.length === 32 && !bytesEqual(c.sha256(data), m.fileSha256)) {
+      throw new Error("media: sha256 do arquivo decifrado não confere");
+    }
+    return { data, type, mimetype: m.mimetype };
+  }
+
   return {
     buildAudioMessage,
     buildImageMessage,
     buildVideoMessage,
     buildDocumentMessage,
     buildStickerMessage,
+    downloadMedia,
   };
+}
+
+/** Qual sub-mensagem de mídia (se alguma) e seus campos de download. */
+function pickMedia(
+  msg: E2EMessage,
+): { type: MediaType; m: MediaFields } | undefined {
+  const m = msg.deviceSentMessage?.message ?? msg.viewOnceMessage?.message ?? msg;
+  if (m.imageMessage) return { type: "image", m: m.imageMessage };
+  if (m.videoMessage) return { type: "video", m: m.videoMessage };
+  if (m.audioMessage) return { type: "audio", m: m.audioMessage };
+  if (m.documentMessage) return { type: "document", m: m.documentMessage };
+  if (m.stickerMessage) return { type: "sticker", m: m.stickerMessage };
+  return undefined;
+}
+
+interface MediaFields {
+  url?: string;
+  directPath?: string;
+  mediaKey?: Uint8Array;
+  fileSha256?: Uint8Array;
+  fileEncSha256?: Uint8Array;
+  mimetype?: string;
+}
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i]! ^ b[i]!;
+  return diff === 0;
 }
 
 function concat(a: Uint8Array, b: Uint8Array): Uint8Array {

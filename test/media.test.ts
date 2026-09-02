@@ -243,6 +243,139 @@ function decryptBody(mediaKey: Uint8Array, info: string): Uint8Array {
   ok("sticker: codec roundtrip", smr.isAnimated === true && smr.width === 512 && eq(smr.mediaKey!, sm.mediaKey!));
 }
 
+// --- downloadMedia: baixa + decifra + verifica -----------------------
+// Sobe uma imagem de verdade pela própria camada (o `fetchOk` captura o corpo
+// cifrado em `postBody`), depois alimenta esse corpo de volta no `downloadMedia`
+// via um `fetch` de download que expõe `arrayBuffer()`.
+const ab = (u: Uint8Array): ArrayBuffer =>
+  u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength) as ArrayBuffer;
+
+{
+  const media = createMediaLayer({ crypto: C, query, fetch: fetchOk });
+  const IMG = C.randomBytes(4096);
+  const built = (await media.buildImageMessage(IMG, { mimetype: "image/png", caption: "x" }))
+    .imageMessage!;
+  const cipherBody = postBody!.slice(); // enc ‖ mac(10) que subiu
+
+  const dlFetch = async (_url: string) => ({
+    ok: true,
+    status: 200,
+    text: async () => "",
+    arrayBuffer: async () => ab(cipherBody),
+  });
+  const dl = createMediaLayer({ crypto: C, query, fetch: dlFetch });
+
+  const got = await dl.downloadMedia({ imageMessage: built });
+  ok("download: bytes decifrados == original", eq(got.data, IMG));
+  ok("download: type = image", got.type === "image");
+  ok("download: mimetype preservado", got.mimetype === "image/png");
+
+  // desembrulha os wrappers
+  const v = await dl.downloadMedia({ viewOnceMessage: { message: { imageMessage: built } } });
+  ok("download: desembrulha viewOnceMessage", eq(v.data, IMG));
+  const d = await dl.downloadMedia({
+    deviceSentMessage: { destinationJid: "x@s.whatsapp.net", message: { imageMessage: built } },
+  });
+  ok("download: desembrulha deviceSentMessage", eq(d.data, IMG));
+
+  // directPath → monta a URL do host de mídia
+  let seenUrl = "";
+  const recFetch = async (url: string) => {
+    seenUrl = url;
+    return { ok: true, status: 200, text: async () => "", arrayBuffer: async () => ab(cipherBody) };
+  };
+  await createMediaLayer({ crypto: C, query, fetch: recFetch }).downloadMedia({
+    imageMessage: { ...built, url: undefined, directPath: "/o1/v/t62/f2/xyz.enc" },
+  });
+  ok(
+    "download: directPath vira https://mmg.whatsapp.net<path>",
+    seenUrl === "https://mmg.whatsapp.net/o1/v/t62/f2/xyz.enc",
+    seenUrl,
+  );
+
+  // MAC errado (corpo corrompido)
+  const bad = cipherBody.slice();
+  bad[0] = bad[0]! ^ 0xff;
+  let threw = "";
+  try {
+    await createMediaLayer({
+      crypto: C,
+      query,
+      fetch: async () => ({ ok: true, status: 200, text: async () => "", arrayBuffer: async () => ab(bad) }),
+    }).downloadMedia({ imageMessage: built });
+  } catch (e) {
+    threw = (e as Error).message;
+  }
+  ok("download: MAC errado → erro", threw.includes("MAC"), threw);
+
+  // MAC ok mas fileSha256 não confere
+  threw = "";
+  try {
+    await dl.downloadMedia({ imageMessage: { ...built, fileSha256: new Uint8Array(32) } });
+  } catch (e) {
+    threw = (e as Error).message;
+  }
+  ok("download: fileSha256 errado → erro", threw.includes("sha256"), threw);
+
+  // sem mediaKey
+  threw = "";
+  try {
+    await dl.downloadMedia({ imageMessage: { ...built, mediaKey: undefined } });
+  } catch (e) {
+    threw = (e as Error).message;
+  }
+  ok("download: sem mediaKey → erro", threw.includes("mediaKey"), threw);
+
+  // sem url nem directPath
+  threw = "";
+  try {
+    await dl.downloadMedia({ imageMessage: { ...built, url: undefined, directPath: undefined } });
+  } catch (e) {
+    threw = (e as Error).message;
+  }
+  ok("download: sem url nem directPath → erro", threw.includes("url"), threw);
+
+  // sem fetch
+  threw = "";
+  try {
+    await createMediaLayer({ crypto: C, query }).downloadMedia({ imageMessage: built });
+  } catch (e) {
+    threw = (e as Error).message;
+  }
+  ok("download: sem fetch → erro claro", threw.includes("fetch"), threw);
+
+  // fetch sem arrayBuffer()
+  threw = "";
+  try {
+    await createMediaLayer({ crypto: C, query, fetch: fetchOk }).downloadMedia({ imageMessage: built });
+  } catch (e) {
+    threw = (e as Error).message;
+  }
+  ok("download: fetch sem arrayBuffer → erro", threw.includes("arrayBuffer"), threw);
+
+  // HTTP != 2xx
+  threw = "";
+  try {
+    await createMediaLayer({
+      crypto: C,
+      query,
+      fetch: async () => ({ ok: false, status: 404, text: async () => "nope" }),
+    }).downloadMedia({ imageMessage: built });
+  } catch (e) {
+    threw = (e as Error).message;
+  }
+  ok("download: HTTP 404 → erro", threw.includes("404"), threw);
+
+  // mensagem sem anexo
+  threw = "";
+  try {
+    await dl.downloadMedia({ conversation: "só texto" });
+  } catch (e) {
+    threw = (e as Error).message;
+  }
+  ok("download: mensagem sem anexo → erro", threw.length > 0, threw);
+}
+
 function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
   const out = new Uint8Array(a.length + b.length);
   out.set(a, 0);

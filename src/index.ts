@@ -80,6 +80,7 @@ export {
   type VideoOptions,
   type DocumentOptions,
   type StickerOptions,
+  type DownloadedMedia,
   type FetchLike,
 } from "./media";
 export {

@@ -21,6 +21,7 @@ import {
   type VideoOptions,
   type DocumentOptions,
   type StickerOptions,
+  type DownloadedMedia,
 } from "./media";
 import { createProfileLayer, type ProfileLayer } from "./profile";
 import {
@@ -116,6 +117,10 @@ export interface OniConnection {
   sendVideo(jid: string, data: Uint8Array, opts?: VideoOptions): Promise<{ id: string }>;
   sendDocument(jid: string, data: Uint8Array, opts?: DocumentOptions): Promise<{ id: string }>;
   sendSticker(jid: string, data: Uint8Array, opts?: StickerOptions): Promise<{ id: string }>;
+  /** Baixa + decifra + verifica (MAC de 10 bytes e, se presente, `fileSha256`) o
+   *  anexo de uma mensagem recebida — passe a `message` de um evento
+   *  `messages.upsert`. Precisa de `fetch` (default `globalThis.fetch`). */
+  downloadMedia(msg: E2EMessage): Promise<DownloadedMedia>;
   /** Posta um status (`status@broadcast`) para `recipients` (JIDs que verão).
    *  `text` vira um status de texto; `media` (com `type`) sobe e posta a mídia. */
   postStatus(
@@ -700,6 +705,7 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
       messages.sendMessage(jid, await media.buildDocumentMessage(data, o2)),
     sendSticker: async (jid, data, o2) =>
       messages.sendMessage(jid, await media.buildStickerMessage(data, o2)),
+    downloadMedia: (msg) => media.downloadMedia(msg),
     postStatus: async (recipients, content) => {
       let msg: E2EMessage;
       if ("text" in content) {
