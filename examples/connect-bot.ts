@@ -36,6 +36,7 @@ import { openWhatsApp } from "../src/client";
 import { fileAuthState } from "../src/auth/file-state";
 import { OniBot, type IncomingMessage } from "../src/bot/bot";
 import { humanBytes } from "../src/bot/monitor";
+import { jidKind } from "../src/frame/jid";
 import { STOCK } from "../src/profiles/index";
 import { messageText } from "../src/proto/e2e-message";
 
@@ -242,7 +243,12 @@ bot.register("bio", "troca o recado/bio do bot (!bio <texto>)", async (args) => 
 bot.register("status", "posta um status: !status <texto>  ou  !status <url> [legenda]", async (args, msg) => {
   const body = args.trim();
   if (!body) return "uso: !status <texto>  |  !status <url de img/vídeo> [legenda]";
-  if (!msg.from.endsWith("@s.whatsapp.net")) return "rode o !status numa conversa 1:1 (preciso de um destinatário)";
+  const kind = jidKind(msg.from);
+  if (kind !== "user" && kind !== "lid") {
+    return "rode o !status numa conversa 1:1 (preciso de um destinatário; num grupo/canal não dá)";
+  }
+  // Demo: o status fica visível só pra quem rodou o comando. Num bot real,
+  // passe a lista de contatos que devem ver.
   const viewers = [msg.from];
   try {
     const isUrl = /^https?:\/\/\S+$/i.test(body.split(/\s+/)[0] ?? "");

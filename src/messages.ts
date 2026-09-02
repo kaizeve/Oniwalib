@@ -30,6 +30,7 @@ import type { AuthenticationState } from "./auth/state";
 import type { Crypto } from "./crypto/types";
 import { node, getBinaryNodeChild, getBinaryNodeChildren, type BinaryNode } from "./frame/node";
 import { jidDecode, isJidGroup, isJidNewsletter, isJidUser, isLidUser } from "./frame/jid";
+import { utf8Decode } from "./frame/buffer";
 import { encodeSignedDeviceIdentity, type ADVSignedDeviceIdentity } from "./proto/adv";
 import {
   makeCurve,
@@ -767,6 +768,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
   }
 
   let lastPreKeyUpload = 0;
+  let preKeyTopUpInFlight = false;
 
   async function uploadPreKeys(range = PREKEY_UPLOAD_COUNT): Promise<void> {
     return serial(async () => {
@@ -790,8 +792,15 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
         node("iq", { to: S_WHATSAPP_NET, type: "get", xmlns: "encrypt" }, [node("count", {})]),
       );
       const cnt = getBinaryNodeChild(res, "count");
-      const v = cnt?.attrs.value ?? res.attrs.value;
-      const n = v === undefined ? NaN : Number(v);
+      const raw =
+        cnt?.attrs.value ??
+        res.attrs.value ??
+        (cnt?.content instanceof Uint8Array
+          ? utf8Decode(cnt.content)
+          : typeof cnt?.content === "string"
+            ? cnt.content
+            : undefined);
+      const n = raw === undefined ? NaN : Number(raw);
       return Number.isFinite(n) ? n : undefined;
     } catch {
       return undefined;
@@ -799,13 +808,24 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
   }
 
   // Servidor avisou que o estoque baixou. NÃO sobe cegamente — isso era um loop:
-  // pergunta o `<count>` primeiro e respeita um intervalo mínimo. Só repõe se
-  // de fato está baixo.
+  // pergunta o `<count>` primeiro, respeita um intervalo mínimo, e um guard de
+  // "já tem uma reposição em andamento" (duas chamadas quase juntas — pós-
+  // `<success>` + notificação real — passavam as duas antes de qualquer upload).
   async function onEncryptNotification(): Promise<void> {
+    if (preKeyTopUpInFlight) return;
     if (Date.now() - lastPreKeyUpload < PREKEY_UPLOAD_MIN_INTERVAL_MS) return;
-    const remaining = await queryPreKeyCount();
-    if (remaining !== undefined && remaining >= PREKEY_LOW_WATERMARK) return;
-    await uploadPreKeys();
+    preKeyTopUpInFlight = true;
+    try {
+      const remaining = await queryPreKeyCount();
+      if (remaining !== undefined) {
+        // eslint-disable-next-line no-console
+        console.log(`messages: servidor tem ${remaining} pré-chave(s) nossas`);
+      }
+      if (remaining !== undefined && remaining >= PREKEY_LOW_WATERMARK) return;
+      await uploadPreKeys();
+    } finally {
+      preKeyTopUpInFlight = false;
+    }
   }
 
   // pkmsg(3) e msg(1) antes de skmsg(9): o pairwise traz o SKDM que o skmsg usa.
