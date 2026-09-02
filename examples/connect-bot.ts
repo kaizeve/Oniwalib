@@ -249,20 +249,28 @@ bot.register("bio", "troca o recado/bio do bot (!bio <texto>)", async (args) => 
 // "audiência" que o bot conhece (o app-state sync com a agenda de verdade é a
 // próxima fase). `ONI_STORY_VIEWERS` (números por vírgula) força uma lista fixa.
 const seenDmContacts = new Set<string>();
+const isPerson = (j?: string): j is string =>
+  !!j && (j.endsWith("@s.whatsapp.net") || j.endsWith("@lid"));
 const storyViewers = (msg: IncomingMessage): string[] => {
   const env = (process.env.ONI_STORY_VIEWERS ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean)
     .map((n) => (n.includes("@") ? n : `${n.replace(/\D/g, "")}@s.whatsapp.net`));
-  const all = new Set<string>([...env, ...seenDmContacts, msg.from]);
-  return [...all];
+  // quem rodou o comando: em 1:1 é `from`, em grupo é `participant`
+  const runner = isPerson(msg.from) ? msg.from : msg.participant;
+  const all = new Set<string>([...env, ...seenDmContacts]);
+  if (isPerson(runner)) all.add(runner);
+  return [...all].filter(isPerson);
 };
 
 const storysCmd = async (args: string, msg: IncomingMessage): Promise<string> => {
   const body = args.trim();
   if (!body) return "uso: !storys <texto>  |  !storys <url de img/vídeo> [legenda]";
   const viewers = storyViewers(msg);
+  if (viewers.length === 0) {
+    return "sem ninguém pra ver o story ainda — manda um oi pro bot numa DM primeiro, ou define ONI_STORY_VIEWERS";
+  }
   try {
     const first = body.split(/\s+/)[0] ?? "";
     if (!/^https?:\/\/\S+$/i.test(first)) {
@@ -335,7 +343,13 @@ conn.events.on("messages.upsert", ({ messages }) => {
     // 1:1 para quem já tem sessão pairwise com a gente. Quem nunca falou no
     // grupo desde que o bot subiu não recebe o SKDM e não vê a resposta —
     // USync/cold-send é a próxima fase.
-    const incoming: IncomingMessage = { from, id: m.key.id, text, timestamp: m.messageTimestamp };
+    const incoming: IncomingMessage = {
+      from,
+      participant: m.key.participant,
+      id: m.key.id,
+      text,
+      timestamp: m.messageTimestamp,
+    };
     void bot.handle(incoming).then(async (reply) => {
       if (reply === undefined) return;
       // Um comando pode devolver uma lista (ex.: menu em texto + em botões).

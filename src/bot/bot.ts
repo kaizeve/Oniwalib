@@ -14,7 +14,10 @@ import type { E2EMessage } from "../proto/e2e-message";
 import { Monitor, humanBytes, humanDuration } from "./monitor";
 
 export interface IncomingMessage {
+  /** Chat de onde veio: 1:1 é o contato; em grupo é o jid do grupo. */
   from: string;
+  /** Em grupo, quem de fato mandou (jid do participante). Ausente em 1:1. */
+  participant?: string;
   id: string;
   text: string;
   /** Carimbo do servidor, em segundos unix. Usado pelo `!ping` para a latência. */
