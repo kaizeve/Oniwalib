@@ -9,7 +9,7 @@ It talks the socket directly — no browser, no Puppeteer, no headless Chrome.
 
 <br>
 
-[![tests](https://img.shields.io/badge/tests-442%2F442%20passing-2ea44f?style=flat-square)](#tests)
+[![tests](https://img.shields.io/badge/tests-459%2F459%20passing-2ea44f?style=flat-square)](#tests)
 [![runtimes](https://img.shields.io/badge/runs%20on-bun%20%C2%B7%20node%20%C2%B7%20RTS-0b7285?style=flat-square)](#status)
 [![language](https://img.shields.io/badge/TypeScript-3178c6?style=flat-square&logo=typescript&logoColor=white)](#)
 [![status](https://img.shields.io/badge/status-early%20%C2%B7%20foundation-d9822b?style=flat-square)](#status)
@@ -118,10 +118,12 @@ doesn't need a cryptographic primitive the engine doesn't expose yet.
 | `events/` · `profiles/` | typed event surface · stock vs modified | ✅ | ✅ |
 | `transport/` — RTS connector | TLS + WebSocket client with custom headers / Origin on the engine | ⛔ | ⛔ |
 
-<sub>¹ Identity signing (XEdDSA) isn't in RTS yet — on the engine, the
-`signedPreKey` carries a placeholder signature and `configureSuccessfulPairing`
-can't produce the device signature until Phase 2. On bun / node it's the real
-`curve25519-js` (same lib as Baileys) and pairing completes.</sub>
+<sub>¹ Identity signing (XEdDSA) landed in RTS
+([UrubuCode/rts#2609](https://github.com/UrubuCode/rts/pull/2609): `xeddsaSign` /
+`xeddsaVerify`) and the RTS adapter now calls it — so the `signedPreKey`
+signature and `configureSuccessfulPairing`'s device signature are real on the
+engine too. Still to do: run the suite against an updated RTS binary to confirm.
+On bun / node it's `curve25519-js` (same lib as Baileys).</sub>
 
 <sub>² `client.ts` is tested on bun (`test/client.test.ts`, full pairing →
 `515` restart → login flow over the mock server); not yet run on RTS.</sub>
@@ -133,17 +135,20 @@ can't produce the device signature until Phase 2. On bun / node it's the real
 | SHA-256, HMAC-SHA256, HKDF, `randomBytes` | `node:crypto` | ✅ already present |
 | AES-128/256-GCM and -CBC | `createCipheriv` / `createDecipheriv` (with `setAAD` / `getAuthTag` / `setAuthTag`) | ✅ added |
 | X25519 ECDH | `generateX25519KeyPair` / `x25519PublicKey` / `x25519DiffieHellman` (raw bytes, no KeyObject) | ✅ added |
-| Curve25519 signing (XEdDSA) | — | ⛔ pending (Phase 2) |
+| Curve25519 signing (XEdDSA) | `xeddsaSign` / `xeddsaVerify` (raw bytes, no KeyObject) | ✅ added ([#2609](https://github.com/UrubuCode/rts/pull/2609)) |
 
-With this, the Noise handshake and credential initialization run on the engine.
-What's left to actually connect **on RTS** is the transport layer (TLS +
-WebSocket client) and XEdDSA signing. On **bun / node** both are covered, so
-pairing works end to end there today — see `examples/pair.ts`.
+With this, the Noise handshake, credential initialization **and identity
+signing** run on the engine — `RTS_GAPS` is now empty. What's left to actually
+connect **on RTS** is the transport layer (TLS + WebSocket client). On
+**bun / node** it's all covered, so pairing works end to end there today — see
+`examples/pair.ts`.
 
 ### <a name="tests"></a>Tests
 
 `version` 11 · `wire` 24 (protobuf codec + `HandshakeMessage` / `ClientPayload`)
-· `wabinary` 29 · `e2e-message` 42 · `noise` 12 · `auth` 22 · `file-state` 18 ·
+· `wabinary` 29 · `e2e-message` 42 · `crypto` 17 (node/rts adapter parity —
+hash/HMAC/HKDF/AES-GCM/CBC — plus XEdDSA sign/verify: round-trip, tamper
+rejection, random-`Z`) · `noise` 12 · `auth` 22 · `file-state` 18 ·
 `socket` 6 · `presence` 21 (receive `<presence>`/`<chatstate>`, send presence /
 subscribe) · `notifications` 10 (profile picture / bio → `contacts.update`) ·
 `bot` 51 (command dispatch + CPU/RAM monitor + end-to-end over the mock server).
@@ -163,7 +168,7 @@ image / video / document / sticker send: per-type HKDF → AES-CBC + 10-byte MAC
 revoke → `messages.delete`; `sendReaction` encrypted back) · `pairing` 18 (the
 `<pair-success>` crypto both directions) ·
 `client` 14 (QR → pairing → `515` restart → login `<success>`, over the mock
-server) → **442 / 442 on bun**.
+server) → **459 / 459 on bun**.
 
 ### <a name="oni-version"></a>Keeping it working — the oni-version
 

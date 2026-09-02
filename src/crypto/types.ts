@@ -3,12 +3,14 @@
 // plataforma diretamente. Assim a lib é ~100% portável e o ÚNICO ponto preso ao
 // motor é qual adapter se injeta.
 //
-// - `node-adapter.ts`  usa `node:crypto` — referência, roda hoje em bun/node e
-//   nas partes que o RTS já tem (HKDF, HMAC, SHA-256, randomBytes).
-// - `rts-adapter.ts`   (Fase 0) usará as primitivas nativas do RTS quando
-//   `createCipheriv` + X25519 + Ed25519 entrarem.
+// - `node-adapter.ts`  usa `node:crypto` + `curve25519-js` — referência, roda em
+//   bun/node.
+// - `rts-adapter.ts`   usa as primitivas nativas do RTS: `node:crypto` para
+//   hashes/HMAC/HKDF/AES-GCM/AES-CBC, o trio X25519 cru e o par XEdDSA
+//   `xeddsaSign`/`xeddsaVerify` (UrubuCode/rts#2609). Fechou — `RTS_GAPS` vazio.
 //
-// O que falta no RTS para o adapter nativo fechar está marcado com  RTS-GAP.
+// As marcas  RTS-GAP  abaixo são históricas: descrevem o que faltava no RTS
+// antes de #2609 e ficam como nota do porquê de cada método existir na interface.
 
 export interface KeyPair {
   /** 32 bytes. */
@@ -55,15 +57,11 @@ export interface Crypto {
   verify(publicKey: Uint8Array, message: Uint8Array, signature: Uint8Array): boolean;
 }
 
-/** Lista dos métodos que o adapter nativo do RTS ainda não consegue prover. */
-export const RTS_GAPS = [
-  "aesGcmEncrypt",
-  "aesGcmDecrypt",
-  "aesCbcEncrypt",
-  "aesCbcDecrypt",
-  "generateX25519",
-  "x25519",
-  "generateSigningKey",
-  "sign",
-  "verify",
-] as const;
+/**
+ * Métodos que o adapter nativo do RTS ainda não consegue prover.
+ *
+ * Vazio desde UrubuCode/rts#2609 (AES-GCM/CBC, trio X25519 e XEdDSA disponíveis
+ * em `node:crypto`). Mantido como lista para `RTS_GAPS.length === 0` seguir
+ * sendo o sinal de "cripto do RTS fechada" e voltar a encher se algo regredir.
+ */
+export const RTS_GAPS: readonly (keyof Crypto)[] = [];

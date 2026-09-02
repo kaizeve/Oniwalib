@@ -71,14 +71,15 @@ export function initAuthCreds(): AuthCreds {
   const preKey = c.generateX25519();
   const keyId = 1;
 
-  // signedPreKey: assina a pública da preKey com a identidade. O RTS ainda não
-  // assina (XEdDSA pendente) — nesse caso, placeholder de 64 zeros. O registro
-  // real contra o servidor precisa da assinatura verdadeira (Fase 2).
-  let signature: Uint8Array;
-  try {
-    signature = c.sign(identity.privateKey, prefixType(preKey.publicKey));
-  } catch {
-    signature = new Uint8Array(64);
+  // signedPreKey: assina a pública da preKey (formato DJB `0x05 || pub`) com a
+  // identidade. Ambos os adapters já assinam de verdade (bun/node via
+  // `curve25519-js`, RTS via `xeddsaSign`), então isto tem de dar uma assinatura
+  // real de 64 bytes — o servidor rejeita o registro com qualquer outra coisa.
+  const signature = c.sign(identity.privateKey, prefixType(preKey.publicKey));
+  if (signature.length !== 64) {
+    throw new Error(
+      `initAuthCreds: assinatura da signedPreKey com ${signature.length} bytes (esperado 64) — adapter de cripto sem XEdDSA?`,
+    );
   }
 
   const regId = ((c.randomBytes(2)[0]! << 8) | c.randomBytes(1)[0]!) & 0x3fff;

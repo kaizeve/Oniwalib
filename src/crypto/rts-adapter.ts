@@ -1,26 +1,29 @@
 // Adapter para quando a lib roda compilada pelo RTS.
 //
 // O RTS expõe, em `node:crypto`: `createHash`, `createHmac`, `randomBytes`,
-// `hkdfSync`, `createCipheriv`/`createDecipheriv` (AES-128/256 GCM e CBC), e o
+// `hkdfSync`, `createCipheriv`/`createDecipheriv` (AES-128/256 GCM e CBC), o
 // trio X25519 em forma de bytes crus — `generateX25519KeyPair`,
-// `x25519PublicKey`, `x25519DiffieHellman`. NÃO tem `generateKeyPairSync`,
-// `KeyObject`, `diffieHellman`, nem assinatura.
+// `x25519PublicKey`, `x25519DiffieHellman` — e o par XEdDSA `xeddsaSign` /
+// `xeddsaVerify` (UrubuCode/rts#2609). NÃO tem `generateKeyPairSync`,
+// `KeyObject` nem `diffieHellman`.
 //
 // Então este adapter é o `node-adapter` menos o dance de KeyObject: cifras e
-// hashes vêm de `node:crypto` (que o RTS implementa), e as curvas vêm do trio
-// cru. `sign`/`verify` ainda não existem no RTS (o WhatsApp usa XEdDSA, não
-// Ed25519 puro) — lançam com mensagem clara.
+// hashes vêm de `node:crypto` (que o RTS implementa), curvas e assinatura vêm
+// das primitivas cruas. Nomes fora do padrão Node de propósito — chaves são
+// bytes crus, sem o DER/PEM/PKCS8 que um KeyObject exigiria.
 
 import nodeCrypto from "node:crypto";
 import type { Crypto, KeyPair } from "./types";
 
 const u8 = (b: unknown): Uint8Array => Uint8Array.from(b as ArrayLike<number>);
 
-// As três funções cruas que o RTS adiciona ao namespace.
+// As primitivas de curva/assinatura que o RTS adiciona ao namespace.
 type RawCurve = {
   generateX25519KeyPair(): { privateKey: Uint8Array; publicKey: Uint8Array };
   x25519PublicKey(priv: Uint8Array): Uint8Array;
   x25519DiffieHellman(priv: Uint8Array, pub: Uint8Array): Uint8Array;
+  xeddsaSign(priv: Uint8Array, message: Uint8Array): Uint8Array;
+  xeddsaVerify(pub: Uint8Array, message: Uint8Array, signature: Uint8Array): boolean;
 };
 const raw = nodeCrypto as unknown as RawCurve;
 
@@ -74,8 +77,10 @@ export const rtsAdapter: Crypto = {
     const d = nodeCrypto.createDecipheriv("aes-256-gcm", key, iv);
     d.setAuthTag(tag);
     if (aad) d.setAAD(aad);
-    d.update(body);
-    return concat(u8(d.update(new Uint8Array(0))), u8(d.final()));
+    // Mesmo `concat` model-agnóstico do encrypt: no RTS `update` devolve vazio e
+    // `final` devolve tudo; no node/bun é o contrário. Descartar o retorno de
+    // `update` (como estava) perdia o plaintext inteiro fora do RTS.
+    return concat(u8(d.update(body)), u8(d.final()));
   },
 
   aesCbcEncrypt(key, iv, plaintext) {
@@ -98,17 +103,20 @@ export const rtsAdapter: Crypto = {
   },
 
   // A chave de identidade do Signal É uma chave X25519 (usada tanto pra DH
-  // quanto pra assinar via XEdDSA). Então o par certo dá pra gerar; só a
-  // OPERAÇÃO de assinar/verificar falta no RTS (XEdDSA — Fase 2).
+  // quanto pra assinar via XEdDSA), então o par certo é o próprio par X25519.
   generateSigningKey(): KeyPair {
     const kp = raw.generateX25519KeyPair();
     return { publicKey: u8(kp.publicKey), privateKey: u8(kp.privateKey) };
   },
-  sign() {
-    throw new Error("oniwalib/rts: sign() indisponível no RTS (XEdDSA pendente — Fase 2)");
+  // XEdDSA cru — assina/verifica exatamente os bytes recebidos (o prefixo de
+  // tipo `0x05` fica com quem chama, igual ao `node-adapter`). O `Z` aleatório
+  // é interno ao RTS e não é exposto — assinar a mesma mensagem duas vezes dá
+  // assinaturas diferentes, ambas válidas.
+  sign(privateKey, message) {
+    return u8(raw.xeddsaSign(privateKey, message));
   },
-  verify() {
-    throw new Error("oniwalib/rts: verify() indisponível no RTS (XEdDSA pendente — Fase 2)");
+  verify(publicKey, message, signature) {
+    return raw.xeddsaVerify(publicKey, message, signature);
   },
 };
 
