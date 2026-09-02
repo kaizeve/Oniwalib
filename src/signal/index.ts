@@ -47,6 +47,7 @@ export {
   type EncryptResult,
 } from "./session-cipher";
 export { makeSignalStorage, type SignalStorage } from "./store";
+export { makeLidStore, type LidStore } from "./lid";
 export {
   SenderKeyRecord,
   processSenderKeyDistribution,

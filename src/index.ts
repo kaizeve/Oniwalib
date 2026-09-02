@@ -112,6 +112,19 @@ export {
 } from "./groups";
 
 export {
+  createChannelsLayer,
+  resolveRequiredChannels,
+  inviteCodeOf,
+  followsChannel,
+  CHANNELS_SOURCE,
+  DEFAULT_REQUIRED_CHANNELS,
+  type ChannelsLayer,
+  type ChannelsLayerOptions,
+  type NewsletterMetadata,
+  type RequiredChannelsResult,
+} from "./channels";
+
+export {
   createPresenceLayer,
   type PresenceLayer,
   type PresenceLayerOptions,

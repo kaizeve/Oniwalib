@@ -243,23 +243,21 @@ bot.register("bio", "troca o recado/bio do bot (!bio <texto>)", async (args) => 
 
 // `!storys <texto>`  |  `!storys <url de img/vídeo> [legenda]`
 //   posta nos stories/status do WhatsApp do bot.
-// Quem vê: os JIDs em ONI_STORY_VIEWERS (números separados por vírgula) — sem
-// isso, só quem rodou o comando (a lista de contatos real precisa de app-state).
-// Toda vez que alguém manda mensagem 1:1 pro bot, o jid entra aqui. É a
-// "audiência" que o bot conhece (o app-state sync com a agenda de verdade é a
-// próxima fase). `ONI_STORY_VIEWERS` (números por vírgula) força uma lista fixa.
-const seenDmContacts = new Set<string>();
+// Quem vê: `conn.knownContacts()` — TODO mundo que já falou 1:1 com o bot, que a
+// lib persiste cifrado no cofre (sobrevive a restart, sem consulta ao servidor).
+// `ONI_STORY_VIEWERS` (números por vírgula) adiciona uma lista fixa por cima.
 const isPerson = (j?: string): j is string =>
   !!j && (j.endsWith("@s.whatsapp.net") || j.endsWith("@lid"));
-const storyViewers = (msg: IncomingMessage): string[] => {
+const storyViewers = async (msg: IncomingMessage): Promise<string[]> => {
   const env = (process.env.ONI_STORY_VIEWERS ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean)
     .map((n) => (n.includes("@") ? n : `${n.replace(/\D/g, "")}@s.whatsapp.net`));
+  const known = await conn.knownContacts().catch(() => [] as string[]);
   // quem rodou o comando: em 1:1 é `from`, em grupo é `participant`
   const runner = isPerson(msg.from) ? msg.from : msg.participant;
-  const all = new Set<string>([...env, ...seenDmContacts]);
+  const all = new Set<string>([...env, ...known]);
   if (isPerson(runner)) all.add(runner);
   return [...all].filter(isPerson);
 };
@@ -267,7 +265,7 @@ const storyViewers = (msg: IncomingMessage): string[] => {
 const storysCmd = async (args: string, msg: IncomingMessage): Promise<string> => {
   const body = args.trim();
   if (!body) return "uso: !storys <texto>  |  !storys <url de img/vídeo> [legenda]";
-  const viewers = storyViewers(msg);
+  const viewers = await storyViewers(msg);
   if (viewers.length === 0) {
     return "sem ninguém pra ver o story ainda — manda um oi pro bot numa DM primeiro, ou define ONI_STORY_VIEWERS";
   }
@@ -333,10 +331,10 @@ conn.events.on("messages.upsert", ({ messages }) => {
     if (!text) continue;
     const from = m.key.remoteJid;
     const inGroup = from.endsWith("@g.us");
-    // conversa 1:1 → esse contato pode ver os stories do bot
-    if (!inGroup && (from.endsWith("@s.whatsapp.net") || from.endsWith("@lid"))) {
-      seenDmContacts.add(from);
-    }
+    // conversa 1:1 → esse contato pode ver os stories do bot. A lib já persiste
+    // isso sozinha ao decifrar a stanza (`noteContact`); a chamada aqui é só
+    // para o caso de a mensagem ter vindo por outro caminho.
+    if (!inGroup && isPerson(from)) void conn.noteContact(from);
     console.log(`← ${inGroup ? `[grupo ${from}] ` : ""}${m.pushName ?? from}: ${text}`);
 
     // Grupo: respondemos com sender key (skmsg) + distribuição do NOSSO SKDM

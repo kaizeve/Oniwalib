@@ -10,3 +10,5 @@ logs/
 .env
 bun.lock
 bun.lockb
+.registry-signing-key
+*.registry-key

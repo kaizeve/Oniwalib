@@ -40,6 +40,7 @@ import {
   decryptPreKeyWhisperMessage,
   initOutgoing,
   type SignalDeps,
+  type LidStore,
 } from "./signal/index";
 import { buildPreKeyUploadNode, buildPreKeyFetchNode, parsePreKeyBundles } from "./signal/prekeys";
 import {
@@ -73,6 +74,10 @@ export interface MessagesLayerOptions {
    *  USYNC, cacheado). Se fornecido, `sendGroupMessage` fana o SKDM pra todos,
    *  não só pros que já têm sessão. */
   groupDevices?: (groupJid: string) => Promise<string[]>;
+  /** Mapa número↔lid. Se fornecido, `sendStatus` resolve destinatários `@lid`
+   *  para o número (que é o que o `statusJidList` espera) e as stanzas de
+   *  entrada alimentam o mapa. */
+  lid?: LidStore;
   /** Persiste `auth.creds` (após upload de pré-chaves). */
   saveCreds?: () => void | Promise<void>;
 }
@@ -107,7 +112,7 @@ const PREKEY_LOW_WATERMARK = 10;
 const PREKEY_UPLOAD_MIN_INTERVAL_MS = 10 * 60 * 1000;
 
 export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
-  const { events, auth, crypto: c, sendNode, genId, query, groupDevices } = opts;
+  const { events, auth, crypto: c, sendNode, genId, query, groupDevices, lid } = opts;
   const deps: SignalDeps = {
     c,
     curve: makeCurve(c),
@@ -122,6 +127,33 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     chain = run.catch(() => {});
     return run;
   };
+
+  // Auto-heal de sessão pairwise dessincronizada. Depois de um re-pareamento ou
+  // de mensagens perdidas, os dois lados podem ficar com sessões que não casam:
+  // o par manda `<enc type=msg>` (acha que a sessão está viva) e aqui só dá
+  // `Bad MAC` / "nenhuma sessão serviu", num loop que nunca cura sozinho. Ao
+  // acumular `SESSION_HEAL_THRESHOLD` falhas seguidas desse tipo para um mesmo
+  // endereço, a gente APAGA a sessão local — o próximo `pkmsg` do par reabre o
+  // X3DH do zero. Identidade (TOFU) e sender keys ficam. Zera no primeiro
+  // decrypt que der certo.
+  const SESSION_HEAL_THRESHOLD = 3;
+  const decryptFailStreak = new Map<string, number>();
+  const looksLikeDesync = (m: string) =>
+    m.includes("Bad MAC") || m.includes("nenhuma sessão serviu") || m.includes("No session record");
+
+  async function healSession(addr: string): Promise<void> {
+    decryptFailStreak.delete(addr);
+    try {
+      await auth.keys.set({ session: { [addr]: null } });
+    } catch {
+      return;
+    }
+    // eslint-disable-next-line no-console
+    console.log(
+      `messages: sessão com ${addr} apagada após ${SESSION_HEAL_THRESHOLD} falhas seguidas — ` +
+        `aguardando o par reabrir (pkmsg)`,
+    );
+  }
 
   // Participantes de grupo com quem temos sessão pairwise — para eles a gente
   // consegue distribuir o NOSSO sender key ao responder no grupo. Cache em
@@ -339,9 +371,25 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
 
     const isGroup = isJidGroup(from);
     const author = a.participant || from;
+
+    // número↔lid: quando o endereçamento é lid, a stanza traz o `@lid` no
+    // `participant`/`from` e o número no atributo `*_pn` ao lado. Registra o par
+    // (o store ignora o que não casar).
+    if (lid) {
+      void lid.remember(a.participant_pn, a.participant);
+      void lid.remember(a.sender_pn ?? a.peer_recipient_pn, isGroup ? undefined : from);
+      void lid.remember(a.recipient_pn, a.recipient);
+    }
     const fromMe = isGroup
       ? sameUser(a.participant, auth.creds.me?.id)
       : sameUser(from, auth.creds.me?.id) && !!a.recipient;
+
+    // conversa 1:1 de OUTRA pessoa → ela falou COM o bot: entra no roster
+    // (audiência de status), persistido. Grupo e mensagem nossa não contam.
+    if (lid && !isGroup && !fromMe) {
+      void lid.noteContact(from);
+      void lid.noteContact(a.sender_pn ?? a.peer_recipient_pn);
+    }
     const chatId = isGroup ? from : fromMe ? a.recipient! : from;
     const addr = signalAddress(author);
     const skName = `${from}::${addr}`;
@@ -442,16 +490,25 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
           }
 
           const ptPair = unpad(await decryptEnc(type, addr, body));
+          decryptFailStreak.delete(addr); // decifrou → sessão sã
           await absorbSkdm(deliver(ptPair));
         } catch (err) {
+          const emsg = (err as Error).message;
           events.emit("messages.upsert", {
             type: "notify",
             messages: [{ key: baseKey, message: undefined, messageTimestamp }],
           });
           // eslint-disable-next-line no-console
-          console.error(
-            `messages: falha ao decifrar <enc type=${type}> de ${author}: ${(err as Error).message}`,
-          );
+          console.error(`messages: falha ao decifrar <enc type=${type}> de ${author}: ${emsg}`);
+
+          // Sessão pairwise dessincronizada: conta as falhas seguidas e, no
+          // limite, apaga a sessão para o próximo pkmsg do par reabrir.
+          if (type === "msg" && looksLikeDesync(emsg)) {
+            const n = (decryptFailStreak.get(addr) ?? 0) + 1;
+            decryptFailStreak.set(addr, n);
+            if (n >= SESSION_HEAL_THRESHOLD) await healSession(addr);
+          }
+
           await sendRetryReceipt(stanza);
         }
       });
@@ -688,9 +745,32 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     const STATUS = "status@broadcast";
     const meId = auth.creds.me?.id;
     if (!meId) throw new Error("sendStatus: sem creds.me");
-    const targets = Array.from(
-      new Set(recipients.filter((j) => isJidUser(j) || isLidUser(j))),
-    );
+
+    // O `statusJidList` do WhatsApp é lista de NÚMERO. Um destinatário `@lid` só
+    // serve se a gente já pareou o número dele (stanza de grupo / metadata) —
+    // senão o cold-send não abre sessão e o status sai pra ninguém.
+    const seen = new Set<string>();
+    const targets: string[] = [];
+    const unresolved: string[] = [];
+    for (const r of recipients) {
+      let jid: string | undefined;
+      if (isJidUser(r)) jid = r;
+      else if (isLidUser(r)) {
+        // eslint-disable-next-line no-await-in-loop
+        jid = (lid ? await lid.toPn(r) : undefined) ?? r;
+        if (!isJidUser(jid)) unresolved.push(r);
+      }
+      if (!jid || seen.has(jid)) continue;
+      seen.add(jid);
+      targets.push(jid);
+    }
+    if (unresolved.length) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `sendStatus: ${unresolved.length} destinatário(s) sem número conhecido, ` +
+          `tentando como lid: ${unresolved.join(", ")}`,
+      );
+    }
     if (targets.length === 0) throw new Error("sendStatus: lista de destinatários vazia");
 
     if (query) {

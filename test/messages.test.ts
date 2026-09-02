@@ -498,6 +498,29 @@ function bundleIq(remote: ReturnType<typeof memoryAuthState>, jid: string, otkPu
   void upserts0;
 }
 
+// --- auto-heal: sessão pairwise dessincronizada é apagada após N falhas -----
+{
+  // o bot tem sessão com USER_JID (do pkmsg lá no começo). Simula o par
+  // mandando `<enc type=msg>` que não decifra (Bad MAC) — 3x seguidas.
+  const ADDR = "5511999999999.0";
+  const had = await botAuth.keys.get("session", [ADDR]);
+  ok("auto-heal: bot começa COM sessão", !!had[ADDR]);
+
+  const garbageMsg = () =>
+    node("message", { from: USER_JID, id: `bad-${Math.random()}`, t: "1700009999" }, [
+      node("enc", { v: "2", type: "msg" }, C.randomBytes(48)),
+    ]);
+
+  await layer.handleMessageStanza(garbageMsg());
+  await layer.handleMessageStanza(garbageMsg());
+  const mid = await botAuth.keys.get("session", [ADDR]);
+  ok("auto-heal: 2 falhas ainda NÃO apagam", !!mid[ADDR]);
+
+  await layer.handleMessageStanza(garbageMsg());
+  const after = await botAuth.keys.get("session", [ADDR]);
+  ok("auto-heal: 3ª falha apaga a sessão", !after[ADDR]);
+}
+
 const rt =
   typeof (globalThis as any).Bun !== "undefined"
     ? "bun"

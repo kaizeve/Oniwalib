@@ -24,6 +24,11 @@ export interface GroupParticipant {
   jid: string;
   /** `undefined` = membro comum. */
   admin?: "admin" | "superadmin";
+  /** Quando o grupo é lid-addressed, o `jid` é `@lid` e este é o número real
+   *  (`553...@s.whatsapp.net`), como o servidor mandou no `<participant>`. */
+  phoneNumber?: string;
+  /** O contrário: grupo por número, mas o servidor anexou o `@lid` do membro. */
+  lid?: string;
 }
 
 export interface GroupMetadata {
@@ -98,6 +103,8 @@ export function extractGroupMetadata(iqResult: BinaryNode): GroupMetadata {
       p.attrs.type === "admin" || p.attrs.type === "superadmin"
         ? (p.attrs.type as "admin" | "superadmin")
         : undefined,
+    phoneNumber: p.attrs.phone_number || undefined,
+    lid: p.attrs.lid || undefined,
   }));
 
   return {

@@ -48,7 +48,11 @@ export type SignalDataType =
   | "sender-key"
   | "app-state-sync-key"
   | "app-state-sync-version"
-  | "sender-key-memory";
+  | "sender-key-memory"
+  // Mapa número↔lid (`553...@s.whatsapp.net` ↔ `1...@lid`). Gravado nos dois
+  // sentidos: id = um lado, valor (string) = o outro. Alimentado passivamente
+  // pelo que as stanzas e a metadata de grupo já pareiam.
+  | "lid-mapping";
 
 export interface SignalKeyStore {
   get(type: SignalDataType, ids: string[]): Promise<Record<string, unknown>>;

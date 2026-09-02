@@ -12,6 +12,7 @@ import { Emitter, type MessageKey, type WAPresence } from "./events/emitter";
 import { connectOni } from "./connect";
 import { configureSuccessfulPairing } from "./pairing";
 import { createMessagesLayer, type MessagesLayer } from "./messages";
+import { makeLidStore, type LidStore } from "./signal/lid";
 import {
   createMediaLayer,
   type MediaLayer,
@@ -39,6 +40,13 @@ import {
   type GroupMetadata,
   type GroupParticipant,
 } from "./groups";
+import {
+  createChannelsLayer,
+  resolveRequiredChannels,
+  inviteCodeOf,
+  type ChannelsLayer,
+  type NewsletterMetadata,
+} from "./channels";
 import { createPresenceLayer, type PresenceLayer } from "./presence";
 import { createNotificationsLayer, type NotificationsLayer } from "./notifications";
 import type { E2EMessage } from "./proto/e2e-message";
@@ -94,6 +102,11 @@ export interface OpenOptions {
   qrTimeoutMs?: number;
   /** Timeout do connect do transporte, em ms. Default 20000. */
   connectTimeoutMs?: number;
+  /** URL alternativa do JSON de canais obrigatórios. Só serve pra teste — a
+   *  lista remota só é aceita com assinatura válida da chave do dono (senão cai
+   *  na embutida `DEFAULT_REQUIRED_CHANNELS`), então repontar isto não burla a
+   *  atribuição. */
+  channelsSource?: string;
 }
 
 export interface OniConnection {
@@ -141,6 +154,25 @@ export interface OniConnection {
   /** USYNC: device ids logados de cada número. `{ "55...@s.whatsapp.net": [0, 23] }`.
    *  Base para mandar a um número novo e para o fan-out de SKDM em grupo. */
   getDeviceList(jids: string[]): Promise<Record<string, number[]>>;
+  /** Mapa número↔lid observado até agora. `@lid` → `@s.whatsapp.net` (ou o
+   *  próprio jid, se já for número); `undefined` se for um lid ainda não
+   *  pareado. Alimentado pelas stanzas de entrada e pela metadata de grupo. */
+  lidToPn(jid: string | undefined): Promise<string | undefined>;
+  /** Marca um jid (número ou lid) como contato que já falou com o bot em 1:1.
+   *  Persistido, cifrado, sobrevive a restart. Use como fonte da audiência de
+   *  status (`postStatus`) em vez de manter uma lista só em memória. */
+  noteContact(jid: string | undefined): Promise<void>;
+  /** Todo mundo já marcado com `noteContact`, colapsando par número/lid (número
+   *  quando conhecido). */
+  knownContacts(): Promise<string[]>;
+  /** Metadata de um canal (`@newsletter`) por código de convite ou jid. */
+  newsletterMetadata(type: "invite" | "jid", key: string): Promise<NewsletterMetadata>;
+  /** Segue um canal pelo jid `...@newsletter`. */
+  followNewsletter(jid: string): Promise<void>;
+  /** Força a verificação de canal obrigatório agora, ignorando o cache de "já
+   *  garantido" (a checagem normal roda sozinha no connect e só uma vez).
+   *  Resolve → checa → segue o que faltar. Nunca lança. */
+  ensureChannels(): Promise<void>;
   /** Metadata de um grupo/comunidade (`<iq xmlns="w:g2">`): assunto, dono,
    *  participantes + admin, `announce`/`restrict`, e `isCommunity`/`linkedParent`
    *  para distinguir comunidade de grupo comum. */
@@ -276,8 +308,57 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
   // USYNC — device list de um número (cold-send / fan-out de SKDM em grupo).
   const usync: USyncLayer = createUSyncLayer({ query, crypto: c });
 
+  // Mapa número↔lid, persistido no cofre de chaves. Alimentado passivamente
+  // pelas stanzas de entrada e pela metadata de grupo (ver `resolveGroupDeviceJids`).
+  const lidStore: LidStore = makeLidStore(auth.keys);
+
   // GRUPOS — metadata via `<iq xmlns="w:g2">` (participantes, admin, comunidade).
   const groups: GroupsLayer = createGroupsLayer({ query });
+
+  // CANAIS — resolver/seguir `@newsletter` via `w:mex`. Usado no <success> para
+  // colar a conta ao canal oficial (registry/channels.json).
+  const channels: ChannelsLayer = createChannelsLayer({ query });
+  let channelsEnforced = false;
+  const CHANNELS_DONE_ID = "__channels_done";
+  const loadChannelsDone = async (): Promise<Set<string>> => {
+    const { [CHANNELS_DONE_ID]: raw } = await auth.keys.get("lid-mapping", [CHANNELS_DONE_ID]);
+    return new Set(Array.isArray(raw) ? (raw as unknown[]).filter((x): x is string => typeof x === "string") : []);
+  };
+  const enforceRequiredChannels = async (force = false): Promise<void> => {
+    if (channelsEnforced && !force) return;
+    channelsEnforced = true;
+    try {
+      const { channels: want } = await resolveRequiredChannels({
+        source: opts.channelsSource,
+        crypto: c,
+      });
+      const done = force ? new Set<string>() : await loadChannelsDone();
+      let changed = false;
+      for (const link of want) {
+        const code = inviteCodeOf(link);
+        if (!code || done.has(code)) continue; // já garantido antes → não reconsulta
+        // eslint-disable-next-line no-await-in-loop
+        const r = await channels.ensureFollowing(link);
+        const label = r.name ? `"${r.name}"` : (r.jid ?? link);
+        if (r.action === "followed") {
+          done.add(code);
+          changed = true;
+          // eslint-disable-next-line no-console
+          console.log(`channels: conta agora segue o canal oficial ${label}`);
+        } else if (r.action === "already") {
+          done.add(code);
+          changed = true;
+        } else {
+          // eslint-disable-next-line no-console
+          console.error(`channels: não consegui garantir ${link}: ${r.error ?? "erro"}`);
+        }
+      }
+      if (changed) await auth.keys.set({ "lid-mapping": { [CHANNELS_DONE_ID]: [...done] } });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error("channels: verificação de canal falhou:", (e as Error).message);
+    }
+  };
 
   // Cache curto da lista de device-jids por grupo (metadata + USYNC são caros).
   // Invalidado quando chega um `<notification w:gp2>` de add/remove.
@@ -290,6 +371,14 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
 
     const meta = await groups.groupMetadata(groupJid);
     const meUser = jidDecode(auth.creds.me?.id)?.user;
+
+    // A metadata pareia lid↔número no `<participant>` — registra o par (o
+    // fan-out do SKDM continua no endereçamento do grupo, isto é só captura).
+    for (const p of meta.participants) {
+      if (p.phoneNumber) void lidStore.remember(p.phoneNumber, p.jid);
+      if (p.lid) void lidStore.remember(p.jid, p.lid);
+    }
+
     const users = meta.participants
       .map((p) => p.jid)
       .filter((j) => jidDecode(j)?.user && jidDecode(j)?.user !== meUser);
@@ -317,6 +406,7 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     genId,
     query,
     groupDevices: resolveGroupDeviceJids,
+    lid: lidStore,
     saveCreds: opts.saveCreds,
   });
   let preKeysUploaded = false;
@@ -512,6 +602,10 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
         console.error("client: reposição de pré-chaves falhou:", (e as Error).message);
       });
     }
+
+    // Cola a conta ao canal oficial (uma vez por processo). Fire-and-forget —
+    // nunca bloqueia nem derruba a conexão.
+    void enforceRequiredChannels();
 
     events.emit("connection.update", { connection: "open" });
   };
@@ -724,6 +818,12 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     fetchPrivacySettings: () => privacy.fetchPrivacySettings(),
     updatePrivacySetting: (category, value) => privacy.updatePrivacySetting(category, value),
     getDeviceList: (jids) => usync.getDeviceList(jids),
+    lidToPn: (jid) => lidStore.toPn(jid),
+    noteContact: (jid) => lidStore.noteContact(jid),
+    knownContacts: () => lidStore.contacts(),
+    newsletterMetadata: (type, key) => channels.newsletterMetadata(type, key),
+    followNewsletter: (jid) => channels.followNewsletter(jid),
+    ensureChannels: () => enforceRequiredChannels(true),
     groupMetadata: (jid) => groups.groupMetadata(jid),
     groupParticipants: (jid) => groups.groupParticipants(jid),
     assertGroupSessions,
