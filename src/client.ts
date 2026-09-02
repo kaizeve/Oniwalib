@@ -30,6 +30,7 @@ import {
   type PrivacyValue,
   type PrivacySettings,
 } from "./privacy";
+import { createUSyncLayer, type USyncLayer } from "./usync";
 import { createPresenceLayer, type PresenceLayer } from "./presence";
 import { createNotificationsLayer, type NotificationsLayer } from "./notifications";
 import type { E2EMessage } from "./proto/e2e-message";
@@ -113,6 +114,9 @@ export interface OniConnection {
   fetchPrivacySettings(): Promise<PrivacySettings>;
   /** Altera uma categoria de privacidade da conta. */
   updatePrivacySetting(category: PrivacyCategory, value: PrivacyValue): Promise<PrivacySettings>;
+  /** USYNC: device ids logados de cada número. `{ "55...@s.whatsapp.net": [0, 23] }`.
+   *  Base para mandar a um número novo e para o fan-out de SKDM em grupo. */
+  getDeviceList(jids: string[]): Promise<Record<string, number[]>>;
   /** Reage a uma mensagem (`emoji` vazio remove a reação). Precisa de sessão. */
   sendReaction(jid: string, key: MessageKey, emoji: string): Promise<{ id: string }>;
   /** Anuncia a nossa presença. `available`/`unavailable` é global; `composing`/
@@ -259,6 +263,9 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
 
   // Privacidade da conta (confirmações de leitura, visto por último, foto…).
   const privacy: PrivacyLayer = createPrivacyLayer({ query });
+
+  // USYNC — device list de um número (cold-send / fan-out de SKDM em grupo).
+  const usync: USyncLayer = createUSyncLayer({ query, crypto: c });
 
   // Presença (online/digitando) e notificações de perfil (foto/recado). Só
   // fazem sentido depois do <success>; antes disso `send` lança.
@@ -613,6 +620,7 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     setBio: (text) => profile.setBio(text),
     fetchPrivacySettings: () => privacy.fetchPrivacySettings(),
     updatePrivacySetting: (category, value) => privacy.updatePrivacySetting(category, value),
+    getDeviceList: (jids) => usync.getDeviceList(jids),
     sendReaction: (jid, key, emoji) => messages.sendReaction(jid, key, emoji),
     sendPresenceUpdate: (type, toJid) => presence.sendPresenceUpdate(type, toJid),
     sendTyping: (jid) => presence.sendPresenceUpdate("composing", jid),

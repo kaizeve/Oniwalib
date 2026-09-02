@@ -95,6 +95,12 @@ export {
   type PrivacyValue,
   type PrivacySettings,
 } from "./privacy";
+export {
+  createUSyncLayer,
+  jidNormalizedUser,
+  type USyncLayer,
+  type USyncLayerOptions,
+} from "./usync";
 
 export {
   createPresenceLayer,

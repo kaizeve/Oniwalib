@@ -18,8 +18,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FILES = [
   "version", "wire", "wabinary", "e2e-message", "crypto", "noise", "auth",
   "file-state", "socket", "signal", "sender-key", "prekeys", "messages", "media",
-  "profile", "privacy", "reaction", "presence", "notifications", "bot", "pairing",
-  "client",
+  "profile", "privacy", "usync", "reaction", "presence", "notifications", "bot",
+  "pairing", "client",
 ];
 
 const rts = process.argv.includes("--rts");

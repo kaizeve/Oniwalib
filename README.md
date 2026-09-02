@@ -9,7 +9,7 @@ It talks the socket directly — no browser, no Puppeteer, no headless Chrome.
 
 <br>
 
-[![tests](https://img.shields.io/badge/tests-474%2F474%20passing-2ea44f?style=flat-square)](#tests)
+[![tests](https://img.shields.io/badge/tests-489%2F489%20passing-2ea44f?style=flat-square)](#tests)
 [![runtimes](https://img.shields.io/badge/runs%20on-bun%20%C2%B7%20node%20%C2%B7%20RTS-0b7285?style=flat-square)](#status)
 [![language](https://img.shields.io/badge/TypeScript-3178c6?style=flat-square&logo=typescript&logoColor=white)](#)
 [![status](https://img.shields.io/badge/status-early%20%C2%B7%20foundation-d9822b?style=flat-square)](#status)
@@ -98,7 +98,7 @@ the single point that still depends on the engine.
 
 ## Status
 
-`oniwalib` runs on **bun / node** and on **RTS**: 474/474 on bun, **451 on RTS**
+`oniwalib` runs on **bun / node** and on **RTS**: 489/489 on bun, **466 on RTS**
 (the one red is `auth/file-state.ts`, the node-only persistence file — see below).
 
 | Module | What it does | bun / node | RTS |
@@ -172,12 +172,14 @@ image / video / document / sticker send: per-type HKDF → AES-CBC + 10-byte MAC
 `media_conn` `<iq>`, upload POST with host fallback, `*Message` codec roundtrip) ·
 `profile` 11 (set / remove profile picture, set bio — the `w:profile:picture` /
 `status` `<iq>`) · `privacy` 11 (`fetchPrivacySettings` / `updatePrivacySetting`
-— the `<iq xmlns="privacy">` `<category>` parse, flat and nested) · `reaction` 19
+— the `<iq xmlns="privacy">` `<category>` parse, flat and nested) · `usync` 15
+(`getDeviceList` — the `<iq xmlns="usync">` device-list query + parse, jid
+normalization, dedup) · `reaction` 19
 (reaction / `protocolMessage` codec roundtrip; incoming reaction → `messages.reaction`,
 revoke → `messages.delete`; `sendReaction` encrypted back) · `pairing` 18 (the
 `<pair-success>` crypto both directions) ·
 `client` 18 (QR → pairing → `515` restart → login `<success>`, over the mock
-server) → **474 / 474 on bun**.
+server) → **489 / 489 on bun**.
 
 ### <a name="oni-version"></a>Keeping it working — the oni-version
 
