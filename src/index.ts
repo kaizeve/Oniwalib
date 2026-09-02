@@ -101,6 +101,14 @@ export {
   type USyncLayer,
   type USyncLayerOptions,
 } from "./usync";
+export {
+  createGroupsLayer,
+  extractGroupMetadata,
+  type GroupsLayer,
+  type GroupsLayerOptions,
+  type GroupMetadata,
+  type GroupParticipant,
+} from "./groups";
 
 export {
   createPresenceLayer,

@@ -9,7 +9,7 @@ It talks the socket directly — no browser, no Puppeteer, no headless Chrome.
 
 <br>
 
-[![tests](https://img.shields.io/badge/tests-531%2F531%20passing-2ea44f?style=flat-square)](#tests)
+[![tests](https://img.shields.io/badge/tests-558%2F558%20passing-2ea44f?style=flat-square)](#tests)
 [![runtimes](https://img.shields.io/badge/runs%20on-bun%20%C2%B7%20node%20%C2%B7%20RTS-0b7285?style=flat-square)](#status)
 [![language](https://img.shields.io/badge/TypeScript-3178c6?style=flat-square&logo=typescript&logoColor=white)](#)
 [![status](https://img.shields.io/badge/status-early%20%C2%B7%20foundation-d9822b?style=flat-square)](#status)
@@ -98,7 +98,7 @@ the single point that still depends on the engine.
 
 ## Status
 
-`oniwalib` runs on **bun / node** and on **RTS**: 531/531 on bun, **508 on RTS**
+`oniwalib` runs on **bun / node** and on **RTS**: 558/558 on bun, **535 on RTS**
 (the one red is `auth/file-state.ts`, the node-only persistence file — see below).
 
 | Module | What it does | bun / node | RTS |
@@ -111,7 +111,9 @@ the single point that still depends on the engine.
 | `pairing.ts` | `configureSuccessfulPairing` — the `<pair-success>` crypto (HMAC + account/device signatures) | ✅ | ✅ |
 | `signal/` | native Double Ratchet + X3DH (1:1) **+ SenderKey group cipher (read)**, own session/sender-key records, pre-key upload — studied from libsignal, imports nothing | ✅ | ✅ |
 | `messages.ts` | decrypt `<message><enc>` (`pkmsg`/`msg` **and `skmsg` — group read**) → `messages.upsert`; **channel (`@newsletter`) `<plaintext>` → `messages.upsert`**; `sendText` / `sendMessage` (1:1) **with cold-send — `assertSessions` fetches the pre-key bundle for a number you've never messaged**; **`sendStatus` — `status@broadcast` sender-key fan-out**; **reactions**; **"delete for everyone"**; pre-keys after `<success>` | ✅ | ✅ |
-| `presence.ts` | `<presence>` / `<chatstate>` → `presence.update` (online, last seen, typing, recording); `sendPresenceUpdate` / `subscribePresence` | ✅ | ✅ |
+| `usync/` · `groups/` | `getDeviceList` (`<iq xmlns="usync">` device protocol) · `groupMetadata` (`<iq xmlns="w:g2">` — participants + admin, `announce`/`restrict`, community via `<parent>`/`<linked_parent>`); `client.assertGroupSessions` chains metadata → USYNC → cold-send | ✅ | ✅ |
+| `privacy/` | `fetchPrivacySettings` / `updatePrivacySetting` (`<iq xmlns="privacy">`) | ✅ | ✅ |
+| `presence.ts` | `<presence>` / `<chatstate>` → `presence.update` (online, last seen, typing, recording); `sendPresenceUpdate` / `subscribePresence`; `client` read receipts + `markOnlineOnConnect` / `sendReadReceipts` toggles | ✅ | ✅ |
 | `notifications.ts` | `<notification>` for profile picture / status (bio) → `contacts.update` | ✅ | ✅ |
 | `client.ts` | `openWhatsApp` — QR + pairing + `515` restart + login + keepalive/acks + message / presence / notification pipeline | ✅ | ✅¹ |
 | `auth/file-state.ts` | encrypted append-only log persistence (node-only, `node:fs`) | ✅ | ⚠️² |
@@ -128,12 +130,15 @@ written file mid-test; every `node:fs` call it uses works in isolation, so it's 
 sequencing edge in RTS's `node:fs` still to be pinned down. The core never
 imports this file (it's opt-in, like the RTS transport connector).</sub>
 
-<sub>Three RTS engine quirks are worked around in the source, with minimal
-repros filed upstream: `const f = () => …; f()?.x` raised a bogus TDZ
-`ReferenceError` (use a `function` declaration); `[…].map(…).join(sep)` with a
-non-ASCII `sep` prepended a stray separator (fold the sep into the `map`); and
-two sibling `const` of the same name inside an awaited async arrow tripped
-`ReferenceError: x is not defined` (give them distinct names).</sub>
+<sub>RTS engine quirks worked around in the source: `const f = () => …; f()?.x`
+raised a bogus TDZ `ReferenceError` (use a `function` declaration); two sibling
+`const` of the same name inside an awaited async arrow tripped `ReferenceError:
+x is not defined` (give them distinct names); `[…].map(…).join(sep)` with a
+non-ASCII `sep` prepended a stray separator (fold the sep into the `map`) —
+filed as [UrubuCode/rts#2612](https://github.com/UrubuCode/rts/issues/2612). A
+native binary of the lib waits on module-graph AOT
+([UrubuCode/rts#2611](https://github.com/UrubuCode/rts/issues/2611)); `rts run` /
+`rts test` compile the graph today.</sub>
 
 ### Phase 0 — engine primitives
 
@@ -179,12 +184,14 @@ image / video / document / sticker send: per-type HKDF → AES-CBC + 10-byte MAC
 `status` `<iq>`) · `privacy` 11 (`fetchPrivacySettings` / `updatePrivacySetting`
 — the `<iq xmlns="privacy">` `<category>` parse, flat and nested) · `usync` 15
 (`getDeviceList` — the `<iq xmlns="usync">` device-list query + parse, jid
-normalization, dedup) · `reaction` 19
+normalization, dedup) · `groups` 27 (`groupMetadata` — the `<iq xmlns="w:g2">`
+`<group>` parse: subject/owner/participants+admin, `announce`/`restrict`,
+community via `<parent>` / `<linked_parent>`) · `reaction` 19
 (reaction / `protocolMessage` codec roundtrip; incoming reaction → `messages.reaction`,
 revoke → `messages.delete`; `sendReaction` encrypted back) · `pairing` 18 (the
 `<pair-success>` crypto both directions) ·
 `client` 18 (QR → pairing → `515` restart → login `<success>`, over the mock
-server) → **531 / 531 on bun**.
+server) → **558 / 558 on bun**.
 
 ### <a name="oni-version"></a>Keeping it working — the oni-version
 

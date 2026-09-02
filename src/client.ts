@@ -31,6 +31,12 @@ import {
   type PrivacySettings,
 } from "./privacy";
 import { createUSyncLayer, type USyncLayer } from "./usync";
+import {
+  createGroupsLayer,
+  type GroupsLayer,
+  type GroupMetadata,
+  type GroupParticipant,
+} from "./groups";
 import { createPresenceLayer, type PresenceLayer } from "./presence";
 import { createNotificationsLayer, type NotificationsLayer } from "./notifications";
 import type { E2EMessage } from "./proto/e2e-message";
@@ -48,6 +54,7 @@ import {
   type BinaryNode,
 } from "./frame/node";
 import { utf8Decode } from "./frame/buffer";
+import { jidDecode } from "./frame/jid";
 
 const S_WHATSAPP_NET = "@s.whatsapp.net";
 const ACKABLE = new Set(["message", "receipt", "notification", "call", "ack"]);
@@ -128,6 +135,17 @@ export interface OniConnection {
   /** USYNC: device ids logados de cada número. `{ "55...@s.whatsapp.net": [0, 23] }`.
    *  Base para mandar a um número novo e para o fan-out de SKDM em grupo. */
   getDeviceList(jids: string[]): Promise<Record<string, number[]>>;
+  /** Metadata de um grupo/comunidade (`<iq xmlns="w:g2">`): assunto, dono,
+   *  participantes + admin, `announce`/`restrict`, e `isCommunity`/`linkedParent`
+   *  para distinguir comunidade de grupo comum. */
+  groupMetadata(jid: string): Promise<GroupMetadata>;
+  /** Só a lista de participantes de um grupo. */
+  groupParticipants(jid: string): Promise<GroupParticipant[]>;
+  /** Pré-abre sessão Signal com TODOS os devices de TODOS os participantes de
+   *  um grupo (metadata → USYNC → cold-send). Roda uma vez (ex.: ao entrar no
+   *  grupo) para o próximo `sendMessage(grupo, …)` alcançar todo mundo, não só
+   *  quem já falou. Devolve quantos devices ficaram sem sessão. */
+  assertGroupSessions(groupJid: string): Promise<{ opened: number; missing: number }>;
   /** Reage a uma mensagem (`emoji` vazio remove a reação). Precisa de sessão. */
   sendReaction(jid: string, key: MessageKey, emoji: string): Promise<{ id: string }>;
   /** Anuncia a nossa presença. `available`/`unavailable` é global; `composing`/
@@ -278,6 +296,9 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
 
   // USYNC — device list de um número (cold-send / fan-out de SKDM em grupo).
   const usync: USyncLayer = createUSyncLayer({ query, crypto: c });
+
+  // GRUPOS — metadata via `<iq xmlns="w:g2">` (participantes, admin, comunidade).
+  const groups: GroupsLayer = createGroupsLayer({ query });
 
   // Presença (online/digitando) e notificações de perfil (foto/recado). Só
   // fazem sentido depois do <success>; antes disso `send` lança.
@@ -613,6 +634,34 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
       });
   };
 
+  // metadata do grupo → USYNC de todos os participantes → cold-send dos que
+  // faltam. O `sendGroupMessage` do messages.ts então acha sessão pra todo
+  // device e fana o SKDM pra todos (não só pros "alcançáveis").
+  const assertGroupSessions = async (
+    groupJid: string,
+  ): Promise<{ opened: number; missing: number }> => {
+    const meta = await groups.groupMetadata(groupJid);
+    const meUser = jidDecode(auth.creds.me?.id)?.user;
+    const users = meta.participants
+      .map((p) => p.jid)
+      .filter((j) => jidDecode(j)?.user !== meUser);
+    if (users.length === 0) return { opened: 0, missing: 0 };
+
+    const devices = await usync.getDeviceList(users);
+    const targets: string[] = [];
+    for (const [user, ids] of Object.entries(devices)) {
+      const d = jidDecode(user);
+      if (!d?.user) continue;
+      for (const id of ids.length ? ids : [0]) {
+        targets.push(id === 0 ? user : `${d.user}:${id}@${d.server}`);
+      }
+    }
+    if (targets.length === 0) return { opened: 0, missing: 0 };
+
+    const stillMissing = await messages.assertSessions(targets);
+    return { opened: targets.length - stillMissing.length, missing: stillMissing.length };
+  };
+
   start();
 
   return {
@@ -645,6 +694,9 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     fetchPrivacySettings: () => privacy.fetchPrivacySettings(),
     updatePrivacySetting: (category, value) => privacy.updatePrivacySetting(category, value),
     getDeviceList: (jids) => usync.getDeviceList(jids),
+    groupMetadata: (jid) => groups.groupMetadata(jid),
+    groupParticipants: (jid) => groups.groupParticipants(jid),
+    assertGroupSessions,
     sendReaction: (jid, key, emoji) => messages.sendReaction(jid, key, emoji),
     sendPresenceUpdate: (type, toJid) => presence.sendPresenceUpdate(type, toJid),
     sendTyping: (jid) => presence.sendPresenceUpdate("composing", jid),
