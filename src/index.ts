@@ -21,6 +21,16 @@ export * as handshakeProto from "./proto/handshake";
 export { Reader as ProtoReader, Writer as ProtoWriter } from "./proto/wire";
 export { encodeClientPayload } from "./proto/client-payload";
 export { buildClientPayload } from "./proto/handshake";
+export {
+  decodeSignedDeviceIdentityHMAC,
+  decodeSignedDeviceIdentity,
+  encodeSignedDeviceIdentity,
+  decodeDeviceIdentity,
+  encodeDeviceIdentity,
+  type ADVSignedDeviceIdentity,
+  type ADVSignedDeviceIdentityHMAC,
+  type ADVDeviceIdentity,
+} from "./proto/adv";
 
 export { NoiseHandshake, type HandshakeResult } from "./noise/handshake";
 export { FrameDecoder, encodeFrame, introHeader } from "./noise/frame";
@@ -33,12 +43,66 @@ export {
   WA_WS_ORIGIN,
 } from "./transport/types";
 export { mockTransportPair } from "./transport/mock";
+export {
+  connectOni,
+  readPairDevice,
+  buildQrString,
+  type Connection,
+  type ConnectOptions as ConnectOniOptions,
+  type PairDeviceRefs,
+} from "./connect";
+export { WebSocketTransport } from "./transport/websocket";
+export { encodeDeviceProps } from "./proto/client-payload";
+
+export {
+  configureSuccessfulPairing,
+  type PairingResult,
+} from "./pairing";
+export {
+  openWhatsApp,
+  type OpenOptions,
+  type OniConnection,
+} from "./client";
+
+export {
+  createMessagesLayer,
+  type MessagesLayer,
+  type MessagesLayerOptions,
+} from "./messages";
+
+export {
+  createPresenceLayer,
+  type PresenceLayer,
+  type PresenceLayerOptions,
+} from "./presence";
+export {
+  createNotificationsLayer,
+  type NotificationsLayer,
+  type NotificationsLayerOptions,
+} from "./notifications";
+
+export * as signal from "./signal/index";
+export {
+  encodeE2EMessage,
+  decodeE2EMessage,
+  messageText,
+  type E2EMessage,
+  type E2EButtonsMessage,
+  type E2EListMessage,
+  type E2EListRow,
+  type E2EMessageKey,
+  type E2EReactionMessage,
+  type E2EProtocolMessage,
+} from "./proto/e2e-message";
+
 export { MockWaServer, type MockMessage } from "./transport/mock-wa-server";
 
 export {
   OniBot,
+  asciiTable,
   type IncomingMessage,
   type CommandHandler,
+  type CommandReply,
   type OniBotOptions,
 } from "./bot/bot";
 export { Monitor, humanBytes, humanDuration, type Stats } from "./bot/monitor";
@@ -60,10 +124,25 @@ export {
   b64decode,
   type AuthCreds,
   type AuthenticationState,
+  type SignalDataType,
   type SignalKeyStore,
+  type SignalIdentity,
 } from "./auth/state";
+export {
+  fileAuthState,
+  AuthStoreCorruptError,
+  type FileAuthState,
+  type FileAuthOptions,
+} from "./auth/file-state";
 
-export { Emitter, type OniwalibEvents, type MessageKey } from "./events/emitter";
+export {
+  Emitter,
+  type OniwalibEvents,
+  type MessageKey,
+  type WAPresence,
+  type PresenceData,
+  type ContactUpdate,
+} from "./events/emitter";
 export {
   STOCK,
   MODIFIED,

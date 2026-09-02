@@ -4,6 +4,7 @@
 
 import type { AuthCreds } from "../auth/state";
 import type { ClientProfile } from "../profiles/index";
+import { jidDecode } from "../frame/jid";
 
 export interface HandshakeMessage {
   clientHello?: { ephemeral: Uint8Array };
@@ -18,6 +19,7 @@ export interface HandshakeMessage {
 export interface ClientPayload {
   username?: number; // número de telefone como inteiro, quando já registrado
   passive: boolean;
+  pull?: boolean; // `true` no login (reconexão já registrada)
   userAgent: {
     platform: "WEB";
     appVersion: { primary: number; secondary: number; tertiary: number };
@@ -58,9 +60,17 @@ function u24be(n: number): Uint8Array {
 export function buildClientPayload(
   creds: AuthCreds,
   profile: ClientProfile,
-  opts: { phoneNumber?: string; buildHash?: Uint8Array } = {},
+  opts: {
+    phoneNumber?: string;
+    /** md5(`major.minor.patch`) — obrigatório no registro real. */
+    buildHash?: Uint8Array;
+    /** `DeviceProps` serializado (ver `encodeDeviceProps`). */
+    deviceProps?: Uint8Array;
+    countryCode?: string;
+  } = {},
 ): ClientPayload {
   const [primary, secondary, tertiary] = profile.waVersion;
+  // Valores que a Baileys manda (validate-connection.ts getUserAgent):
   const base: ClientPayload = {
     passive: false,
     connectType: "WIFI_UNKNOWN",
@@ -71,23 +81,38 @@ export function buildClientPayload(
       appVersion: { primary, secondary, tertiary },
       mcc: "000",
       mnc: "000",
-      osVersion: profile.browser[2],
+      osVersion: "0.1",
       manufacturer: "",
-      device: profile.browser[1],
-      osBuildNumber: profile.browser[2],
+      device: "Desktop",
+      osBuildNumber: "0.1",
       releaseChannel: "RELEASE",
-      localeLanguageIso6391: "pt",
-      localeCountryIso31661Alpha2: "BR",
+      localeLanguageIso6391: "en",
+      localeCountryIso31661Alpha2: opts.countryCode ?? "US",
     },
   };
 
-  if (creds.registered && opts.phoneNumber) {
-    base.username = Number(opts.phoneNumber.replace(/\D/g, ""));
-    base.device = creds.me ? 0 : 0;
+  // Login (reconexão já registrada): número e device saem do JID do próprio
+  // dispositivo (`creds.me.id`), como o `generateLoginNode` da Baileys. Sem
+  // regData — só `username` + `device` + `pull`.
+  const meJid = creds.registered ? creds.me?.id : undefined;
+  if (meJid) {
+    const dec = jidDecode(meJid);
+    base.passive = true;
+    base.pull = true;
+    base.username = Number((dec?.user ?? "").replace(/\D/g, ""));
+    base.device = dec?.device ?? 0;
     return base;
   }
 
-  // primeiro login — carrega os dados de registro
+  if (creds.registered && opts.phoneNumber) {
+    base.passive = true;
+    base.pull = true;
+    base.username = Number(opts.phoneNumber.replace(/\D/g, ""));
+    base.device = 0;
+    return base;
+  }
+
+  // primeiro login (QR) — carrega os dados de registro
   base.passive = false;
   base.regData = {
     eRegid: u32be(creds.registrationId),
@@ -96,10 +121,10 @@ export function buildClientPayload(
     eSkeyId: u24be(creds.signedPreKey.keyId),
     eSkeyVal: creds.signedPreKey.keyPair.publicKey,
     eSkeySig: creds.signedPreKey.signature,
-    // md5("major.minor.patch") — ver `versionBuildHash` em `version.ts`. Sem
-    // ele passado, 16 zeros (placeholder até o registro real, Fase 2).
+    // md5("major.minor.patch") — ver `versionBuildHash`. Sem ele, 16 zeros
+    // (o servidor recusa; passe `opts.buildHash` no registro real).
     buildHash: opts.buildHash ?? new Uint8Array(16),
-    deviceProps: new Uint8Array(0),
+    deviceProps: opts.deviceProps ?? new Uint8Array(0),
   };
   return base;
 }

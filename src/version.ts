@@ -13,12 +13,14 @@
 export type OniVersion = [number, number, number];
 
 /** Fallback embutido. Atualizado a cada release; vale quando não há rede nem cache. */
-export const DEFAULT_ONI_VERSION: OniVersion = [2, 3000, 1023223821];
+export const DEFAULT_ONI_VERSION: OniVersion = [2, 3000, 1043857760];
 
 /** De onde `fetchLatestOniVersion` tenta ler, em ordem. */
 export const DEFAULT_SOURCES = [
   // 1. O JSON que este repo publica. Editar ele = atualizar todo mundo.
   "https://raw.githubusercontent.com/Oberonhosting/Oniwalib/main/oni-version.json",
+  // 1b. A version.json da Baileys — autoritativa, atualizada com frequência.
+  "https://raw.githubusercontent.com/WhiskeySockets/Baileys/master/src/Defaults/baileys-version.json",
   // 2. A própria WhatsApp Web — fonte autoritativa, formato menos estável.
   "https://web.whatsapp.com/",
 ] as const;

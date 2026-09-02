@@ -49,6 +49,7 @@ class Server {
   salt!: Uint8Array;
   encKey!: Uint8Array;
   decKey!: Uint8Array;
+  hc = 0; // contador único do handshake
   w = 0;
   r = 0;
   fin = false;
@@ -61,8 +62,8 @@ class Server {
   gotNode?: unknown;
 
   constructor(private t: Transport) {
-    const name = Uint8Array.from("Noise_XX_25519_AESGCM_SHA256", (c) => c.charCodeAt(0));
-    this.hash = C.sha256(name);
+    const name = Uint8Array.from("Noise_XX_25519_AESGCM_SHA256\0\0\0\0", (c) => c.charCodeAt(0));
+    this.hash = name; // 32 bytes crus (ver src/noise/handshake.ts)
     this.salt = this.hash;
     this.encKey = this.hash;
     this.decKey = this.hash;
@@ -76,18 +77,19 @@ class Server {
     this.salt = o.subarray(0, 32);
     this.encKey = o.subarray(32, 64);
     this.decKey = o.subarray(32, 64);
+    this.hc = 0;
     this.w = 0;
     this.r = 0;
   }
   private enc(p: Uint8Array) {
-    const c = C.aesGcmEncrypt(this.encKey, iv(this.w), p, this.hash);
-    this.w++;
+    const c = C.aesGcmEncrypt(this.encKey, iv(this.hc), p, this.hash);
+    this.hc++;
     if (!this.fin) this.mixHash(c);
     return c;
   }
   private decr(c: Uint8Array) {
-    const p = C.aesGcmDecrypt(this.decKey, iv(this.r), c, this.hash);
-    this.r++;
+    const p = C.aesGcmDecrypt(this.decKey, iv(this.hc), c, this.hash);
+    this.hc++;
     if (!this.fin) this.mixHash(c);
     return p;
   }
@@ -96,7 +98,8 @@ class Server {
     if (!this.introSkipped) {
       this.intro = cat(this.intro, d);
       if (this.intro.length < 4) return;
-      // 4 bytes de intro header (WA + major + minor), então frames.
+      // 4 bytes de intro header (WA + major + minor) — entram no prologue.
+      this.mixHash(this.intro.subarray(0, 4));
       d = this.intro.subarray(4);
       this.introSkipped = true;
     }

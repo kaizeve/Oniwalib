@@ -12,7 +12,7 @@
 // abaixo é completo e testado sobre `MockTransport`.
 
 import type { Crypto, KeyPair } from "../crypto/types";
-import { decodeBinaryNode } from "../frame/decode";
+import { decodeBinaryNode, type Inflate } from "../frame/decode";
 import { encodeBinaryNode } from "../frame/encode";
 import type { BinaryNode } from "../frame/node";
 import { Emitter } from "../events/emitter";
@@ -29,6 +29,8 @@ export interface NoiseSocketOptions {
   clientPayload: Uint8Array;
   /** Certificado Noise recebido — validação da cadeia fica a cargo de quem chama. */
   onCertificate?: (cert: Uint8Array, serverStatic: Uint8Array) => void;
+  /** Descompressão zlib para frames comprimidos (bit 1 do flag). */
+  inflate?: Inflate;
 }
 
 export class NoiseSocket {
@@ -40,8 +42,11 @@ export class NoiseSocket {
   private connectedReject?: (e: Error) => void;
   private state: "idle" | "handshaking" | "open" | "closed" = "idle";
 
+  private readonly header = introHeader();
+
   constructor(private readonly opts: NoiseSocketOptions) {
-    this.hs = new NoiseHandshake(opts.crypto);
+    // O header `WA 6 3` entra no transcript do Noise (prologue).
+    this.hs = new NoiseHandshake(opts.crypto, this.header);
     this.ephemeral = opts.crypto.generateX25519();
   }
 
@@ -62,11 +67,11 @@ export class NoiseSocket {
       this.connectedReject = reject;
 
       const hello = this.hs.clientHello(this.ephemeral);
-      // Intro header vai colado no primeiro frame.
+      // O mesmo header que entrou no prologue vai colado no primeiro frame.
       const framed = encodeFrame(encodeHandshake({ clientHello: { ephemeral: hello } }));
-      const first = new Uint8Array(introHeader().length + framed.length);
-      first.set(introHeader(), 0);
-      first.set(framed, introHeader().length);
+      const first = new Uint8Array(this.header.length + framed.length);
+      first.set(this.header, 0);
+      first.set(framed, this.header.length);
       this.opts.transport.send(first);
     });
   }
@@ -121,7 +126,7 @@ export class NoiseSocket {
   private onTransportFrame(frame: Uint8Array): void {
     try {
       const plain = this.hs.transportDecrypt(frame);
-      const node = decodeBinaryNode(plain);
+      const node = decodeBinaryNode(plain, this.opts.inflate);
       this.events.emit("node.recv", node);
     } catch (e) {
       this.fail(e as Error);

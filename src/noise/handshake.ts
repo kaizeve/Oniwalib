@@ -14,7 +14,11 @@
 
 import type { Crypto, KeyPair } from "../crypto/types";
 
-const PROTOCOL = "Noise_XX_25519_AESGCM_SHA256";
+// O nome do protocolo TEM 4 nulls de padding — completa 32 bytes, e o Noise
+// (e o WhatsApp) usa esses 32 bytes CRUS como hash inicial, não `sha256(nome)`.
+// Sem o padding, `"Noise_XX_25519_AESGCM_SHA256"` tem 28 chars e cairia no
+// `sha256`, divergindo do servidor no primeiro passo.
+const PROTOCOL = "Noise_XX_25519_AESGCM_SHA256\0\0\0\0";
 const ASCII = (s: string): Uint8Array => Uint8Array.from(s, (c) => c.charCodeAt(0));
 
 function concat(...parts: Uint8Array[]): Uint8Array {
@@ -51,16 +55,28 @@ export class NoiseHandshake {
   private salt: Uint8Array;
   private encKey: Uint8Array;
   private decKey: Uint8Array;
+  // DURANTE o handshake o Noise usa UM contador só (o nonce `n`), compartilhado
+  // por encrypt e decrypt, resetado apenas no `mixKey`. Só no transporte
+  // (pós-`finish`) é que read/write têm contadores separados.
+  private counter = 0;
   private writeCounter = 0;
   private readCounter = 0;
   private finished = false;
 
-  constructor(private readonly c: Crypto) {
+  constructor(
+    private readonly c: Crypto,
+    /** Bytes misturados no hash logo após a inicialização — o WhatsApp usa o
+     *  header `WA 6 3` aqui (ver Baileys `authenticate(NOISE_WA_HEADER)`). */
+    prologue?: Uint8Array,
+  ) {
     const name = ASCII(PROTOCOL);
     this.hash = name.length === 32 ? name : c.sha256(name);
     this.salt = this.hash;
     this.encKey = this.hash;
     this.decKey = this.hash;
+    if (prologue && prologue.length) {
+      this.mixHash(prologue);
+    }
   }
 
   authenticate(data: Uint8Array): void {
@@ -76,13 +92,12 @@ export class NoiseHandshake {
     this.salt = out.subarray(0, 32);
     this.encKey = out.subarray(32, 64);
     this.decKey = out.subarray(32, 64);
-    this.writeCounter = 0;
-    this.readCounter = 0;
+    this.counter = 0; // InitializeKey → nonce volta a 0
   }
 
   encrypt(plaintext: Uint8Array): Uint8Array {
-    const ct = this.c.aesGcmEncrypt(this.encKey, iv(this.writeCounter), plaintext, this.hash);
-    this.writeCounter += 1;
+    const ct = this.c.aesGcmEncrypt(this.encKey, iv(this.counter), plaintext, this.hash);
+    this.counter += 1;
     if (!this.finished) {
       this.mixHash(ct);
     }
@@ -90,8 +105,8 @@ export class NoiseHandshake {
   }
 
   decrypt(ciphertext: Uint8Array): Uint8Array {
-    const pt = this.c.aesGcmDecrypt(this.decKey, iv(this.readCounter), ciphertext, this.hash);
-    this.readCounter += 1;
+    const pt = this.c.aesGcmDecrypt(this.decKey, iv(this.counter), ciphertext, this.hash);
+    this.counter += 1;
     if (!this.finished) {
       this.mixHash(ciphertext);
     }

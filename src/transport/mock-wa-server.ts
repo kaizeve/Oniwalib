@@ -45,6 +45,7 @@ export class MockWaServer {
   private salt: Uint8Array;
   private encKey: Uint8Array;
   private decKey: Uint8Array;
+  private ctr = 0; // contador único do handshake (Noise); w/r só no transporte
   private w = 0;
   private r = 0;
   private fin = false;
@@ -54,6 +55,7 @@ export class MockWaServer {
   private introSkipped = false;
   private intro = new Uint8Array(0);
   private replyHandlers = new Set<(n: BinaryNode) => void>();
+  private readyHandlers = new Set<() => void>();
 
   clientPayload?: Uint8Array;
 
@@ -63,8 +65,8 @@ export class MockWaServer {
   ) {
     this.e = c.generateX25519();
     this.s = c.generateX25519();
-    const name = Uint8Array.from("Noise_XX_25519_AESGCM_SHA256", (ch) => ch.charCodeAt(0));
-    this.hash = c.sha256(name);
+    const name = Uint8Array.from("Noise_XX_25519_AESGCM_SHA256\0\0\0\0", (ch) => ch.charCodeAt(0));
+    this.hash = name; // 32 bytes crus (ver handshake.ts)
     this.salt = this.hash;
     this.encKey = this.hash;
     this.decKey = this.hash;
@@ -76,13 +78,24 @@ export class MockWaServer {
     return () => this.replyHandlers.delete(handler);
   }
 
-  /** Envia uma mensagem de texto ao cliente (só depois do handshake). */
-  pushMessage(m: MockMessage): void {
+  /** Dispara quando o handshake fecha (já dá pra `pushNode`). */
+  onReady(handler: () => void): () => void {
+    this.readyHandlers.add(handler);
+    if (this.fin) handler();
+    return () => this.readyHandlers.delete(handler);
+  }
+
+  /** Cifra, enquadra e envia um binary node arbitrário ao cliente. */
+  pushNode(n: BinaryNode): void {
     if (!this.fin) throw new Error("handshake não terminou");
-    const n = node("message", { from: m.from, id: m.id }, [node("body", {}, m.text)]);
     const ct = this.c.aesGcmEncrypt(this.encKey, iv(this.w), encodeBinaryNode(n));
     this.w++;
     this.transport.send(encodeFrame(ct));
+  }
+
+  /** Envia uma mensagem de texto ao cliente (só depois do handshake). */
+  pushMessage(m: MockMessage): void {
+    this.pushNode(node("message", { from: m.from, id: m.id }, [node("body", {}, m.text)]));
   }
 
   private mixHash(d: Uint8Array): void {
@@ -93,18 +106,17 @@ export class MockWaServer {
     this.salt = o.subarray(0, 32);
     this.encKey = o.subarray(32, 64);
     this.decKey = o.subarray(32, 64);
-    this.w = 0;
-    this.r = 0;
+    this.ctr = 0;
   }
   private enc(p: Uint8Array): Uint8Array {
-    const ct = this.c.aesGcmEncrypt(this.encKey, iv(this.w), p, this.hash);
-    this.w++;
+    const ct = this.c.aesGcmEncrypt(this.encKey, iv(this.ctr), p, this.hash);
+    this.ctr++;
     if (!this.fin) this.mixHash(ct);
     return ct;
   }
   private decr(ct: Uint8Array): Uint8Array {
-    const p = this.c.aesGcmDecrypt(this.decKey, iv(this.r), ct, this.hash);
-    this.r++;
+    const p = this.c.aesGcmDecrypt(this.decKey, iv(this.ctr), ct, this.hash);
+    this.ctr++;
     if (!this.fin) this.mixHash(ct);
     return p;
   }
@@ -113,6 +125,8 @@ export class MockWaServer {
     if (!this.introSkipped) {
       this.intro = cat(this.intro, d);
       if (this.intro.length < 4) return;
+      // O header entra no transcript do Noise (prologue), igual ao cliente.
+      this.mixHash(this.intro.subarray(0, 4));
       d = this.intro.subarray(4);
       this.introSkipped = true;
     }
@@ -154,6 +168,7 @@ export class MockWaServer {
       this.w = 0;
       this.r = 0;
       this.fin = true;
+      for (const h of this.readyHandlers) h();
     }
   }
 }

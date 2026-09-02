@@ -45,7 +45,8 @@ function attachBot(sock: NoiseSocket, bot: OniBot): void {
     };
     void bot.handle(msg).then((reply) => {
       if (reply !== undefined) {
-        sock.sendNode(node("message", { to: msg.from, id: `r-${msg.id}` }, [node("body", {}, reply)]));
+        const body = typeof reply === "string" ? reply : JSON.stringify(reply);
+        sock.sendNode(node("message", { to: msg.from, id: `r-${msg.id}` }, [node("body", {}, body)]));
       }
     });
   });

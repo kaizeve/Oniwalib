@@ -87,7 +87,9 @@ ok("zero não emite", new Writer().uint(1, 0).bool(2, false).string(3, "").finis
 
   // Parse genérico: os campos de topo esperados aparecem.
   const f = new Reader(bytes).fields();
-  ok("passive omitido (proto3, é false)", f.get(3) === undefined);
+  // WAProto é proto2/optional: passive=false vai no fio explícito (18 00),
+  // como a Baileys manda.
+  ok("passive escrito explícito (proto2)", f.get(3)?.[0] === 0);
   ok("userAgent presente (campo 5, sub-mensagem)", f.get(5)?.[0] instanceof Uint8Array);
   ok("connectType presente (campo 12, valor 1)", f.get(12)?.[0] === 1);
   ok("connectReason presente (campo 13, valor 1)", f.get(13)?.[0] === 1);

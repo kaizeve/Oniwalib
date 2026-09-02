@@ -13,7 +13,9 @@ export interface FrameHeaderOpts {
 }
 
 export function introHeader(opts: FrameHeaderOpts = {}): Uint8Array {
-  const [major, minor] = opts.version ?? [6, 0];
+  // WhatsApp: "WA" + 6 + DICT_VERSION (3 no protocolo atual — ver Baileys
+  // Defaults.NOISE_WA_HEADER).
+  const [major, minor] = opts.version ?? [6, 3];
   const parts: number[] = [];
   if (opts.routingInfo) {
     // ED tag 0xF8 + tamanho, no formato que o edge usa antes do WA magic.

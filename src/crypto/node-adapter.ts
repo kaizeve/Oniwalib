@@ -5,6 +5,7 @@
 // `rts-adapter.ts` não toca em mais nada.
 
 import nodeCrypto from "node:crypto";
+import * as curve25519 from "curve25519-js";
 import type { Crypto, KeyPair } from "./types";
 
 const u8 = (b: Uint8Array | Buffer): Uint8Array => Uint8Array.from(b);
@@ -110,35 +111,19 @@ export const nodeAdapter: Crypto = {
     return u8(nodeCrypto.diffieHellman(objs));
   },
 
-  // NOTA: o WhatsApp assina com XEdDSA sobre a chave de identidade X25519, não
-  // Ed25519 puro. Aqui é Ed25519 como placeholder testável; a Fase 2 reconcilia
-  // isso (via curve25519 do libsignal ou o adapter nativo do RTS).
+  // Assinatura XEdDSA sobre Curve25519 — o que o WhatsApp/Signal usam de fato
+  // (a chave de identidade é X25519, usada pra DH E pra assinar). `curve25519-js`
+  // é a implementação ref10 pura, mesma que o libsignal.
   generateSigningKey(): KeyPair {
-    const { publicKey, privateKey } = nodeCrypto.generateKeyPairSync("ed25519");
-    return {
-      publicKey: jwkRaw("x", publicKey),
-      privateKey: jwkRaw("d", privateKey),
-    };
+    const kp = curve25519.generateKeyPair(u8(nodeCrypto.randomBytes(32)));
+    return { publicKey: u8(kp.public), privateKey: u8(kp.private) };
   },
 
   sign(privateKey, message) {
-    const d = Buffer.from(privateKey).toString("base64url");
-    const key = nodeCrypto.createPrivateKey({
-      key: { kty: "OKP", crv: "Ed25519", d, x: d } as nodeCrypto.JsonWebKey,
-      format: "jwk",
-    });
-    return u8(nodeCrypto.sign(null, message, key));
+    return u8(curve25519.sign(privateKey, message, u8(nodeCrypto.randomBytes(64))));
   },
 
   verify(publicKey, message, signature) {
-    const key = nodeCrypto.createPublicKey({
-      key: {
-        kty: "OKP",
-        crv: "Ed25519",
-        x: Buffer.from(publicKey).toString("base64url"),
-      } as nodeCrypto.JsonWebKey,
-      format: "jwk",
-    });
-    return nodeCrypto.verify(null, message, key, signature);
+    return curve25519.verify(publicKey, message, signature);
   },
 };

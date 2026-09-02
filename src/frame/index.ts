@@ -6,6 +6,14 @@ export {
   getBinaryNodeChildren,
   type BinaryNode,
 } from "./node";
-export { jidDecode, jidEncode, isJidGroup, isJidUser, type Jid } from "./jid";
+export {
+  jidDecode,
+  jidEncode,
+  isJidGroup,
+  isJidUser,
+  isJidBroadcast,
+  type FullJid,
+  type JidServer,
+} from "./jid";
 export { TAGS } from "./constants";
 export { BufferReader, BufferWriter, utf8Decode, utf8Encode } from "./buffer";
