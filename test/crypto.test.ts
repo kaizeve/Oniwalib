@@ -23,11 +23,15 @@ const eq = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 const bytes = (s: string) => Uint8Array.from(s, (ch) => ch.charCodeAt(0));
 
-// O trio X25519 cru e o XEdDSA só existem no `node:crypto` do RTS — em bun/node
-// as partes do `rts-adapter` que dependem deles não têm como rodar.
+// Runtime probe. bun/node: KeyObjects (`generateKeyPairSync`) + `curve25519-js`,
+// mas NÃO o trio X25519 cru nem `xeddsaSign`. RTS: o inverso. Só sobre bun os
+// dois adapters conseguem rodar o mesmo caminho de curva/assinatura, então a
+// paridade cruzada de X25519/XEdDSA e os testes do `nodeAdapter` que usam
+// `curve25519-js` ficam atrás de `nodeOk`.
 const rawCrypto = nodeCrypto as unknown as Record<string, unknown>;
 const hasRawCurve = typeof rawCrypto.generateX25519KeyPair === "function";
 const hasXeddsa = typeof rawCrypto.xeddsaSign === "function";
+const nodeOk = typeof rawCrypto.generateKeyPairSync === "function";
 
 // --- RTS_GAPS vazio (cripto do RTS fechada) ------------------------------
 ok("RTS_GAPS está vazio", RTS_GAPS.length === 0, `sobrou: ${RTS_GAPS.join(", ")}`);
@@ -84,8 +88,8 @@ ok("RTS_GAPS está vazio", RTS_GAPS.length === 0, `sobrou: ${RTS_GAPS.join(", ")
 }
 
 // --- X25519: as duas pontas chegam ao mesmo segredo -------------------
-if (!hasRawCurve) {
-  console.log("  ~ x25519 rts-adapter: pulado (runtime sem generateX25519KeyPair — esperado em bun/node)");
+if (!hasRawCurve || !nodeOk) {
+  console.log("  ~ x25519 paridade cruzada: pulada (runtime não tem os dois adapters de curva)");
 } else {
   const a = nodeAdapter.generateX25519();
   const b = rtsAdapter.generateX25519();
@@ -94,7 +98,9 @@ if (!hasRawCurve) {
 }
 
 // --- XEdDSA no node-adapter (curve25519-js) --------------------------
-{
+if (!nodeOk) {
+  console.log("  ~ node-adapter XEdDSA: pulado (runtime sem curve25519-js/KeyObjects — esperado no RTS)");
+} else {
   const kp = nodeAdapter.generateSigningKey();
   ok("signing key: 32/32 bytes", kp.privateKey.length === 32 && kp.publicKey.length === 32);
 
@@ -134,8 +140,12 @@ if (!hasRawCurve) {
     bad[0] ^= 1;
     ok("rts XEdDSA: mensagem alterada falha", !rtsAdapter.verify(kp.publicKey, bad, sig));
     // Cross-check: o node-adapter aceita o que o RTS assinou (mesma curva/esquema).
-    ok("rts XEdDSA: node-adapter verifica a assinatura do RTS",
-      nodeAdapter.verify(kp.publicKey, msg, sig));
+    // Só dá pra fazer onde os dois adapters rodam — ou seja, nunca ao mesmo
+    // tempo hoje (bun tem node-adapter sem xeddsa nativo; RTS o inverso).
+    if (nodeOk) {
+      ok("rts XEdDSA: node-adapter verifica a assinatura do RTS",
+        nodeAdapter.verify(kp.publicKey, msg, sig));
+    }
   }
 }
 

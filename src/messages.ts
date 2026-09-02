@@ -371,17 +371,17 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
         try {
           if (type === "skmsg") {
             const rec = await loadSenderKey(skName);
-            const plain = unpad(groupDecrypt(c, rec, body));
+            const ptGroup = unpad(groupDecrypt(c, rec, body));
             await storeSenderKey(skName, rec);
-            deliver(plain);
+            deliver(ptGroup);
             // Lemos este participante → se já temos sessão pairwise com ele,
             // registra como alcançável (sobrevive ao restart via store).
             await rememberGroupPeer(from, author);
             return;
           }
 
-          const plain = unpad(await decryptEnc(type, addr, body));
-          await absorbSkdm(deliver(plain));
+          const ptPair = unpad(await decryptEnc(type, addr, body));
+          await absorbSkdm(deliver(ptPair));
         } catch (err) {
           events.emit("messages.upsert", {
             type: "notify",

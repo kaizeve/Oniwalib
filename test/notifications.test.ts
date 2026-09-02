@@ -21,7 +21,7 @@ const JID = "5511999999999@s.whatsapp.net";
 const events = new Emitter();
 const got: any[] = [];
 events.on("contacts.update", (u) => got.push(u));
-const last = () => got[got.length - 1];
+function last() { return got[got.length - 1]; }
 
 const layer = createNotificationsLayer({ events });
 

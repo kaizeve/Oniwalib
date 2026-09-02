@@ -282,10 +282,13 @@ export function asciiTable(headers: string[], rows: string[][]): string {
   const widths = headers.map((h, i) =>
     Math.max(h.length, ...rows.map((r) => (r[i] ?? "").length)),
   );
+  // `.join(sep)` com `sep` fora do Latin-1 (│ ┬ …) enfia um separador fantasma
+  // no começo do resultado no RTS — então dobra o separador dentro do `.map` e
+  // junta com "".  (bug do motor: `[..].map(..).join("┬")` vira `"┬..┬.."`).
   const line = (cells: string[]) =>
-    "│ " + cells.map((c, i) => (c ?? "").padEnd(widths[i]!)).join(" │ ") + " │";
+    "│ " + cells.map((c, i) => (i ? " │ " : "") + (c ?? "").padEnd(widths[i]!)).join("") + " │";
   const rule = (l: string, m: string, r: string) =>
-    l + widths.map((w) => "─".repeat(w + 2)).join(m) + r;
+    l + widths.map((w, i) => (i ? m : "") + "─".repeat(w + 2)).join("") + r;
   return [
     rule("┌", "┬", "┐"),
     line(headers),

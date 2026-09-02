@@ -98,35 +98,41 @@ the single point that still depends on the engine.
 
 ## Status
 
-`oniwalib` runs on **bun / node today**, and on **RTS** for everything that
-doesn't need a cryptographic primitive the engine doesn't expose yet.
+`oniwalib` runs on **bun / node** and on **RTS**: 459/459 on bun, **436 on RTS**
+(the one red is `auth/file-state.ts`, the node-only persistence file — see below).
 
 | Module | What it does | bun / node | RTS |
 |---|---|:---:|:---:|
 | `frame/` | WABinary codec: binary node, buffers, JID, token tables | ✅ | ✅ |
 | `noise/` | XX handshake + framing + `NoiseSocket` | ✅ | ✅ |
-| `crypto/` | `Crypto` interface + `node:crypto` adapter (bun/node) + RTS adapter | ✅ | ✅ |
+| `crypto/` | `Crypto` interface + `node:crypto`/`curve25519-js` adapter (bun/node) + RTS adapter (`node:crypto` incl. XEdDSA) | ✅ | ✅ |
 | `proto/` | own protobuf codec (no protobufjs) + message builders (buttons / list / interactive) + `HandshakeMessage` / `ClientPayload` wire | ✅ | ✅ |
-| `auth/` | credentials + Signal key store + signal identities | ✅ | ✅¹ |
-| `pairing.ts` | `configureSuccessfulPairing` — the `<pair-success>` crypto (HMAC + account/device signatures) | ✅ | ✅¹ |
-| `signal/` | native Double Ratchet + X3DH (1:1) **+ SenderKey group cipher (read)**, own session/sender-key records, pre-key upload — studied from libsignal, imports nothing | ✅ | ✅¹ |
-| `messages.ts` | decrypt `<message><enc>` (`pkmsg`/`msg` **and `skmsg` — group read**) → `messages.upsert`; `sendText` / `sendMessage` (1:1 reply); **reactions (`messages.reaction` + `sendReaction`)**; **"delete for everyone" (`messages.delete`)**; pre-keys after `<success>` | ✅ | ✅¹ |
+| `auth/` | credentials + Signal key store + signal identities | ✅ | ✅ |
+| `pairing.ts` | `configureSuccessfulPairing` — the `<pair-success>` crypto (HMAC + account/device signatures) | ✅ | ✅ |
+| `signal/` | native Double Ratchet + X3DH (1:1) **+ SenderKey group cipher (read)**, own session/sender-key records, pre-key upload — studied from libsignal, imports nothing | ✅ | ✅ |
+| `messages.ts` | decrypt `<message><enc>` (`pkmsg`/`msg` **and `skmsg` — group read**) → `messages.upsert`; `sendText` / `sendMessage` (1:1 reply); **reactions (`messages.reaction` + `sendReaction`)**; **"delete for everyone" (`messages.delete`)**; pre-keys after `<success>` | ✅ | ✅ |
 | `presence.ts` | `<presence>` / `<chatstate>` → `presence.update` (online, last seen, typing, recording); `sendPresenceUpdate` / `subscribePresence` | ✅ | ✅ |
 | `notifications.ts` | `<notification>` for profile picture / status (bio) → `contacts.update` | ✅ | ✅ |
-| `client.ts` | `openWhatsApp` — QR + pairing + `515` restart + login + keepalive/acks + message / presence / notification pipeline | ✅ | ✅² |
+| `client.ts` | `openWhatsApp` — QR + pairing + `515` restart + login + keepalive/acks + message / presence / notification pipeline | ✅ | ✅¹ |
+| `auth/file-state.ts` | encrypted append-only log persistence (node-only, `node:fs`) | ✅ | ⚠️² |
 | `transport/` | `Transport` interface + `MockTransport` + `WebSocketTransport` (bun/node) | ✅ | ✅ |
 | `events/` · `profiles/` | typed event surface · stock vs modified | ✅ | ✅ |
 | `transport/` — RTS connector | TLS + WebSocket client with custom headers / Origin on the engine | ⛔ | ⛔ |
 
-<sub>¹ Identity signing (XEdDSA) landed in RTS
-([UrubuCode/rts#2609](https://github.com/UrubuCode/rts/pull/2609): `xeddsaSign` /
-`xeddsaVerify`) and the RTS adapter now calls it — so the `signedPreKey`
-signature and `configureSuccessfulPairing`'s device signature are real on the
-engine too. Still to do: run the suite against an updated RTS binary to confirm.
-On bun / node it's `curve25519-js` (same lib as Baileys).</sub>
+<sub>¹ `client.ts` passes on RTS via `test/client.test.ts` (full pairing → `515`
+restart → login over the mock server); a live socket still needs the RTS
+transport connector.</sub>
 
-<sub>² `client.ts` is tested on bun (`test/client.test.ts`, full pairing →
-`515` restart → login flow over the mock server); not yet run on RTS.</sub>
+<sub>² `test/file-state.test.ts` fails on RTS with an `ENOENT` on a freshly
+written file mid-test; every `node:fs` call it uses works in isolation, so it's a
+sequencing edge in RTS's `node:fs` still to be pinned down. The core never
+imports this file (it's opt-in, like the RTS transport connector).</sub>
+
+<sub>Two RTS engine bugs are worked around in the source, with minimal repros
+filed upstream: `const f = () => …; f()?.x` raised a bogus TDZ `ReferenceError`
+(fixed by using a `function` declaration in the tests); and
+`[…].map(…).join(sep)` with a non-ASCII `sep` prepended a stray separator (fixed
+in `asciiTable` by folding the separator into the `map`).</sub>
 
 ### Phase 0 — engine primitives
 
@@ -137,10 +143,12 @@ On bun / node it's `curve25519-js` (same lib as Baileys).</sub>
 | X25519 ECDH | `generateX25519KeyPair` / `x25519PublicKey` / `x25519DiffieHellman` (raw bytes, no KeyObject) | ✅ added |
 | Curve25519 signing (XEdDSA) | `xeddsaSign` / `xeddsaVerify` (raw bytes, no KeyObject) | ✅ added ([#2609](https://github.com/UrubuCode/rts/pull/2609)) |
 
-With this, the Noise handshake, credential initialization **and identity
-signing** run on the engine — `RTS_GAPS` is now empty. What's left to actually
-connect **on RTS** is the transport layer (TLS + WebSocket client). On
-**bun / node** it's all covered, so pairing works end to end there today — see
+With this, the Noise handshake, credential initialization, identity signing,
+the Signal 1:1 + group ciphers, pairing and the message/presence pipeline all
+run on the engine — `RTS_GAPS` is empty and the suite is green on RTS bar
+`file-state`. What's left to actually **connect** on RTS is the transport layer
+(TLS + WebSocket client). On **bun / node** it's all covered, so pairing works
+end to end there today — see
 `examples/pair.ts`.
 
 ### <a name="tests"></a>Tests

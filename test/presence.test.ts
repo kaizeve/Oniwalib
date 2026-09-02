@@ -24,7 +24,7 @@ const sent: BinaryNode[] = [];
 const events = new Emitter();
 const updates: any[] = [];
 events.on("presence.update", (u) => updates.push(u));
-const last = () => updates[updates.length - 1];
+function last() { return updates[updates.length - 1]; }
 
 let gid = 0;
 const layer = createPresenceLayer({
