@@ -11,7 +11,13 @@ export {
   jidEncode,
   isJidGroup,
   isJidUser,
+  isLidUser,
   isJidBroadcast,
+  isJidNewsletter,
+  isJidStatusBroadcast,
+  isJidBot,
+  jidKind,
+  type ChatKind,
   type FullJid,
   type JidServer,
 } from "./jid";

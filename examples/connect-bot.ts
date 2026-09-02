@@ -236,6 +236,33 @@ bot.register("bio", "troca o recado/bio do bot (!bio <texto>)", async (args) => 
   }
 });
 
+// !status <texto>  → status de texto
+// !status <url de imagem/vídeo> [legenda]  → posta a mídia como status
+// Visível para quem mandou o comando (num teste real, passe a lista de contatos).
+bot.register("status", "posta um status: !status <texto>  ou  !status <url> [legenda]", async (args, msg) => {
+  const body = args.trim();
+  if (!body) return "uso: !status <texto>  |  !status <url de img/vídeo> [legenda]";
+  if (!msg.from.endsWith("@s.whatsapp.net")) return "rode o !status numa conversa 1:1 (preciso de um destinatário)";
+  const viewers = [msg.from];
+  try {
+    const isUrl = /^https?:\/\/\S+$/i.test(body.split(/\s+/)[0] ?? "");
+    if (!isUrl) {
+      const r = await conn.postStatus(viewers, { text: body });
+      console.log(`→ status de texto p/ ${r.sentTo} viewer(s)`);
+      return `✅ status postado para ${r.sentTo} pessoa(s)`;
+    }
+    const [url, ...rest] = body.split(/\s+/);
+    const caption = rest.join(" ") || undefined;
+    const { bytes, mime } = await grab(url!);
+    const type = mime.startsWith("video/") ? "video" : "image";
+    const r = await conn.postStatus(viewers, { media: bytes, type, caption });
+    console.log(`→ status ${type} (${humanBytes(bytes.length)}) p/ ${r.sentTo} viewer(s)`);
+    return `✅ status (${type}) postado para ${r.sentTo} pessoa(s)`;
+  } catch (e) {
+    return `erro no !status: ${(e as Error).message}`;
+  }
+});
+
 conn.events.on("connection.update", (u) => {
   if (u.qr) {
     console.log("\nescaneie (WhatsApp > Aparelhos conectados > Conectar um aparelho):\n");

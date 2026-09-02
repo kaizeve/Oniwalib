@@ -28,8 +28,8 @@
 import type { Emitter } from "./events/emitter";
 import type { AuthenticationState } from "./auth/state";
 import type { Crypto } from "./crypto/types";
-import { node, getBinaryNodeChildren, type BinaryNode } from "./frame/node";
-import { jidDecode, isJidGroup } from "./frame/jid";
+import { node, getBinaryNodeChild, getBinaryNodeChildren, type BinaryNode } from "./frame/node";
+import { jidDecode, isJidGroup, isJidNewsletter, isJidUser, isLidUser } from "./frame/jid";
 import { encodeSignedDeviceIdentity, type ADVSignedDeviceIdentity } from "./proto/adv";
 import {
   makeCurve,
@@ -81,6 +81,10 @@ export interface MessagesLayer {
    *  faltam, busca o bundle (`<iq xmlns="encrypt">`) e roda o X3DH. Precisa de
    *  `query`. Devolve os jids que ficaram SEM sessão (device fora do ar etc.). */
   assertSessions(jids: string[]): Promise<string[]>;
+  /** Posta um status (`status@broadcast`). `recipients` é a lista de quem vai
+   *  ver (JIDs de usuário / lid). Abre sessão com quem falta. Devolve o id e
+   *  para quantos foi cifrado. */
+  sendStatus(msg: E2EMessage, recipients: string[]): Promise<{ id: string; sentTo: number }>;
   /** Reage a uma mensagem. `emoji` vazio (`""`) remove a reação. */
   sendReaction(jid: string, key: MessageKey, emoji: string): Promise<{ id: string }>;
   uploadPreKeys(range?: number): Promise<void>;
@@ -281,6 +285,42 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     const a = stanza.attrs;
     const from = a.from;
     if (!from || !a.id) {
+      sendDeliveryReceipt(stanza);
+      return;
+    }
+
+    // CANAL (`@newsletter`): a mensagem NÃO é Signal — vem em `<plaintext>` com
+    // o `proto.Message` cru (sem pad). Decodifica direto e emite `messages.upsert`.
+    // O `newsletter_server_id` (`a.server_id`) é o id da mensagem no canal — útil
+    // para reações/views depois; por ora vai no lugar do `id`.
+    if (isJidNewsletter(from)) {
+      const pt = getBinaryNodeChild(stanza, "plaintext");
+      const bytes =
+        pt?.content instanceof Uint8Array
+          ? pt.content
+          : stanza.content instanceof Uint8Array
+            ? stanza.content
+            : undefined;
+      if (bytes && bytes.length > 0) {
+        try {
+          const msg = decodeE2EMessage(bytes);
+          events.emit("messages.upsert", {
+            type: "notify",
+            messages: [
+              {
+                key: { remoteJid: from, fromMe: false, id: a.id },
+                message: msg,
+                messageTimestamp: a.t ? Number(a.t) : undefined,
+                pushName: a.notify,
+                ...(a.server_id ? { newsletterServerId: Number(a.server_id) } : {}),
+              },
+            ],
+          });
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.error(`messages: canal ${from} — plaintext ilegível:`, (e as Error).message);
+        }
+      }
       sendDeliveryReceipt(stanza);
       return;
     }
@@ -611,6 +651,95 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     });
   }
 
+  // STATUS (`status@broadcast`) — mesma mecânica de sender key do grupo, mas o
+  // "grupo" é `status@broadcast` e os destinatários são uma lista explícita (a
+  // Baileys pede `statusJidList`). Abre sessão com quem falta via cold-send.
+  async function sendStatus(
+    msg: E2EMessage,
+    recipients: string[],
+  ): Promise<{ id: string; sentTo: number }> {
+    const STATUS = "status@broadcast";
+    const meId = auth.creds.me?.id;
+    if (!meId) throw new Error("sendStatus: sem creds.me");
+    const targets = Array.from(
+      new Set(recipients.filter((j) => isJidUser(j) || isLidUser(j))),
+    );
+    if (targets.length === 0) throw new Error("sendStatus: lista de destinatários vazia");
+
+    if (query) {
+      try {
+        await assertSessions(targets);
+      } catch {
+        /* segue com quem já tem sessão */
+      }
+    }
+
+    return serial(async () => {
+      const recName = `${STATUS}::${signalAddress(meId)}`;
+      const rec = await loadSenderKey(recName);
+      const skdm = createSenderKeyDistribution(c, rec);
+      const skCipher = groupEncrypt(c, rec, pad(encodeE2EMessage(msg)));
+      await storeSenderKey(recName, rec);
+
+      const skdmPlain = pad(
+        encodeE2EMessage({
+          senderKeyDistributionMessage: {
+            groupId: STATUS,
+            axolotlSenderKeyDistributionMessage: skdm,
+          },
+        }),
+      );
+
+      const toNodes: BinaryNode[] = [];
+      let anyPkmsg = false;
+      let addressingMode: string | undefined;
+      for (const jid of targets) {
+        let addr: string;
+        try {
+          addr = signalAddress(jid);
+        } catch {
+          continue;
+        }
+        if (isLidUser(jid)) addressingMode = "lid";
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const { type, body } = await signalEncrypt(deps, addr, skdmPlain);
+          toNodes.push(
+            node("to", { jid }, [
+              node("enc", { v: "2", type: type === 3 ? "pkmsg" : "msg" }, body),
+            ]),
+          );
+          if (type === 3) anyPkmsg = true;
+        } catch {
+          /* sem sessão com esse destinatário */
+        }
+      }
+      if (toNodes.length === 0) {
+        throw new Error("sendStatus: nenhum destinatário com sessão (tente `assertSessions` antes)");
+      }
+
+      const content: BinaryNode[] = [
+        node("participants", {}, toNodes),
+        node("enc", { v: "2", type: "skmsg" }, skCipher),
+      ];
+      if (anyPkmsg && auth.creds.account) {
+        content.push(
+          node(
+            "device-identity",
+            {},
+            encodeSignedDeviceIdentity(auth.creds.account as ADVSignedDeviceIdentity, true),
+          ),
+        );
+      }
+
+      const id = genId();
+      const attrs: Record<string, string> = { id, to: STATUS, type: "text" };
+      if (addressingMode) attrs.addressing_mode = addressingMode;
+      sendNode(node("message", attrs, content));
+      return { id, sentTo: toNodes.length };
+    });
+  }
+
   async function uploadPreKeys(range = PREKEY_UPLOAD_COUNT): Promise<void> {
     return serial(async () => {
       const { node: iq, update, count } = await buildPreKeyUploadNode(auth, range, c);
@@ -658,6 +787,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     sendText,
     sendMessage,
     assertSessions,
+    sendStatus,
     sendReaction,
     uploadPreKeys,
     onEncryptNotification,

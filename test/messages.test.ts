@@ -357,6 +357,43 @@ function coldAddr(a: ReturnType<typeof memoryAuthState>): string {
   return `${u}.0`;
 }
 
+// --- canal (@newsletter): <plaintext> sem Signal → messages.upsert ---------
+{
+  const CHAN = "120363000000000001@newsletter";
+  const plain = encodeE2EMessage({ conversation: "aviso do canal" });
+  const stanza = node(
+    "message",
+    { from: CHAN, id: "n1", t: "1700001234", server_id: "42", notify: "Meu Canal" },
+    [node("plaintext", {}, plain)],
+  );
+  const before = upserts.length;
+  await layer.handleMessageStanza(stanza);
+  const u = upserts[upserts.length - 1];
+  ok("canal: emitiu messages.upsert", upserts.length === before + 1);
+  ok("canal: remoteJid = jid do canal", u?.messages?.[0]?.key?.remoteJid === CHAN);
+  ok("canal: texto do <plaintext>", u?.messages?.[0]?.message?.conversation === "aviso do canal");
+  ok("canal: newsletterServerId = server_id", u?.messages?.[0]?.newsletterServerId === 42);
+  ok("canal: manda <receipt> de entrega", sent.some((n) => n.tag === "receipt" && n.attrs.id === "n1"));
+}
+
+// --- status (status@broadcast): fan-out por sender key --------------------
+{
+  // `layer` (bot) já abriu sessão com USER_JID ao processar o pkmsg lá em cima.
+  sent.length = 0;
+  const r = await layer.sendStatus({ conversation: "meu status" }, [USER_JID]);
+  ok("status: cifrou para 1 destinatário", r.sentTo === 1);
+  const stMsg = sent.find((n) => n.tag === "message" && n.attrs.to === "status@broadcast");
+  ok("status: <message to=status@broadcast>", !!stMsg);
+  const parts = getBinaryNodeChildren(getBinaryNodeChild(stMsg, "participants"), "to");
+  ok("status: <participants><to jid=USER><enc></to>", parts[0]?.attrs.jid === USER_JID &&
+    getBinaryNodeChild(parts[0], "enc") !== undefined);
+  ok("status: <enc type=skmsg> no corpo", getBinaryNodeChildren(stMsg, "enc").some((e) => e.attrs.type === "skmsg"));
+
+  let threw = "";
+  try { await layer.sendStatus({ conversation: "x" }, []); } catch (e) { threw = (e as Error).message; }
+  ok("status: lista vazia lança", threw.includes("destinatários"), threw);
+}
+
 const rt =
   typeof (globalThis as any).Bun !== "undefined"
     ? "bun"

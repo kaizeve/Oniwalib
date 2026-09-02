@@ -108,6 +108,12 @@ export interface OniConnection {
   sendVideo(jid: string, data: Uint8Array, opts?: VideoOptions): Promise<{ id: string }>;
   sendDocument(jid: string, data: Uint8Array, opts?: DocumentOptions): Promise<{ id: string }>;
   sendSticker(jid: string, data: Uint8Array, opts?: StickerOptions): Promise<{ id: string }>;
+  /** Posta um status (`status@broadcast`) para `recipients` (JIDs que verão).
+   *  `text` vira um status de texto; `media` (com `type`) sobe e posta a mídia. */
+  postStatus(
+    recipients: string[],
+    content: { text: string } | { media: Uint8Array; type: "image" | "video"; caption?: string },
+  ): Promise<{ id: string; sentTo: number }>;
   /** Troca a sua foto de perfil (JPEG, idealmente quadrado ~640px). */
   setProfilePicture(jpeg: Uint8Array): Promise<void>;
   /** Remove a sua foto de perfil. */
@@ -622,6 +628,17 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
       messages.sendMessage(jid, await media.buildDocumentMessage(data, o2)),
     sendSticker: async (jid, data, o2) =>
       messages.sendMessage(jid, await media.buildStickerMessage(data, o2)),
+    postStatus: async (recipients, content) => {
+      let msg: E2EMessage;
+      if ("text" in content) {
+        msg = { conversation: content.text };
+      } else if (content.type === "image") {
+        msg = await media.buildImageMessage(content.media, { caption: content.caption });
+      } else {
+        msg = await media.buildVideoMessage(content.media, { caption: content.caption });
+      }
+      return messages.sendStatus(msg, recipients);
+    },
     setProfilePicture: (jpeg) => profile.setProfilePicture(jpeg),
     removeProfilePicture: () => profile.removeProfilePicture(),
     setBio: (text) => profile.setBio(text),

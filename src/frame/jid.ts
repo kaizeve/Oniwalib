@@ -57,5 +57,34 @@ export function jidDecode(jid: string | undefined): FullJid | undefined {
 }
 
 export const isJidUser = (jid: string | undefined) => jid?.endsWith("@s.whatsapp.net");
+export const isLidUser = (jid: string | undefined) => jid?.endsWith("@lid");
 export const isJidGroup = (jid: string | undefined) => jid?.endsWith("@g.us");
 export const isJidBroadcast = (jid: string | undefined) => jid?.endsWith("@broadcast");
+export const isJidNewsletter = (jid: string | undefined) => jid?.endsWith("@newsletter");
+export const isJidStatusBroadcast = (jid: string | undefined) => jid === "status@broadcast";
+export const isJidBot = (jid: string | undefined) => jid?.endsWith("@bot");
+
+/** Que tipo de chat um JID representa. `group` cobre grupo comum E comunidade
+ *  (o quê exatamente só a metadata do grupo diz — `<parent>` / `parent_group_id`);
+ *  `channel` é um canal (`@newsletter`); `status` é o feed de status. */
+export type ChatKind =
+  | "user"
+  | "lid"
+  | "group"
+  | "channel"
+  | "status"
+  | "broadcast"
+  | "bot"
+  | "unknown";
+
+export function jidKind(jid: string | undefined): ChatKind {
+  if (!jid) return "unknown";
+  if (isJidStatusBroadcast(jid)) return "status";
+  if (isJidGroup(jid)) return "group";
+  if (isJidNewsletter(jid)) return "channel";
+  if (isJidBroadcast(jid)) return "broadcast";
+  if (isLidUser(jid)) return "lid";
+  if (isJidBot(jid)) return "bot";
+  if (isJidUser(jid) || jid.endsWith("@c.us")) return "user";
+  return "unknown";
+}

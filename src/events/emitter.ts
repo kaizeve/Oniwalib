@@ -25,6 +25,8 @@ export interface OniwalibEvents {
       /** Carimbo do servidor (`t`), em segundos unix, quando a stanza traz. */
       messageTimestamp?: number;
       pushName?: string;
+      /** Só em canal (`@newsletter`): id da mensagem dentro do canal (`server_id`). */
+      newsletterServerId?: number;
     }>;
   };
   "messages.receipt": { key: MessageKey; receipt: "delivery" | "read" | "played" };
