@@ -42,6 +42,15 @@ export interface OniwalibEvents {
   "presence.update": { id: string; presences: Record<string, PresenceData> };
   /** Mudou foto de perfil, recado (bio/about) ou nome de um contato. */
   "contacts.update": ContactUpdate[];
+  /** Metadata de um grupo mudou (assunto, descrição, `announce`/`restrict`…). */
+  "groups.update": Array<{ id: string } & Record<string, unknown>>;
+  /** Entrou/saiu/virou admin alguém num grupo. */
+  "group-participants.update": {
+    id: string;
+    author?: string;
+    participants: string[];
+    action: "add" | "remove" | "promote" | "demote" | "modify";
+  };
   "node.recv": BinaryNode;
   "node.send": BinaryNode;
 }

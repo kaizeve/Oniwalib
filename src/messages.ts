@@ -68,6 +68,10 @@ export interface MessagesLayerOptions {
    *  `assertSessions` (cold-send) não funciona — só dá pra responder quem já
    *  mandou mensagem. */
   query?: (n: BinaryNode, timeoutMs?: number) => Promise<BinaryNode>;
+  /** Devolve todos os device-jids dos participantes de um grupo (metadata +
+   *  USYNC, cacheado). Se fornecido, `sendGroupMessage` fana o SKDM pra todos,
+   *  não só pros que já têm sessão. */
+  groupDevices?: (groupJid: string) => Promise<string[]>;
   /** Persiste `auth.creds` (após upload de pré-chaves). */
   saveCreds?: () => void | Promise<void>;
 }
@@ -95,7 +99,7 @@ export interface MessagesLayer {
 const PREKEY_UPLOAD_COUNT = 30;
 
 export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
-  const { events, auth, crypto: c, sendNode, genId, query } = opts;
+  const { events, auth, crypto: c, sendNode, genId, query, groupDevices } = opts;
   const deps: SignalDeps = {
     c,
     curve: makeCurve(c),
@@ -575,6 +579,21 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
   // Quem ainda não recebeu o nosso SKDM não decifra até (re)aparecer — mesma
   // limitação que a leitura de grupo tem hoje.
   async function sendGroupMessage(groupJid: string, msg: E2EMessage): Promise<{ id: string }> {
+    // FORA do `serial`: se há resolvedor de devices do grupo (client.ts —
+    // metadata + USYNC, com cache), abre sessão com todo device de todo membro
+    // antes de fanar o SKDM. Sem isso, só alcança quem já tem sessão pairwise.
+    let extraJids: string[] = [];
+    if (groupDevices) {
+      try {
+        extraJids = await groupDevices(groupJid);
+        if (extraJids.length) await assertSessions(extraJids);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error(`messages: grupo ${groupJid} — não resolvi os devices:`, (e as Error).message);
+        extraJids = [];
+      }
+    }
+
     return serial(async () => {
       const meId = auth.creds.me?.id;
       if (!meId) throw new Error("sendGroupMessage: sem creds.me");
@@ -584,15 +603,15 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
       const skCipher = groupEncrypt(c, rec, pad(encodeE2EMessage(msg)));
       await storeSenderKey(recName, rec);
 
-      // Candidatos = cache em memória ∪ o que está no store durável.
+      // Candidatos = cache em memória ∪ store durável ∪ devices resolvidos agora.
       const mem = await loadPeerMem(groupJid);
       const candidates = new Map<string, string>(); // addr -> jid
       for (const [a2, j2] of groupPeers.get(groupJid) ?? []) candidates.set(a2, j2);
-      for (const j2 of Object.keys(mem)) {
+      for (const j2 of [...Object.keys(mem), ...extraJids]) {
         try {
           candidates.set(signalAddress(j2), j2);
         } catch {
-          /* jid estranho no store — ignora */
+          /* jid estranho — ignora */
         }
       }
 

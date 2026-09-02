@@ -357,6 +357,73 @@ function coldAddr(a: ReturnType<typeof memoryAuthState>): string {
   return `${u}.0`;
 }
 
+function bundleIq(remote: ReturnType<typeof memoryAuthState>, jid: string, otkPub: Uint8Array, id: string): BinaryNode {
+  const be = (x: number, len: number) => {
+    const a = new Uint8Array(len);
+    let r = x;
+    for (let i = len - 1; i >= 0; i--) { a[i] = r & 0xff; r = Math.floor(r / 256); }
+    return a;
+  };
+  return node("iq", { type: "result", id }, [
+    node("list", {}, [
+      node("user", { jid }, [
+        node("registration", {}, be(remote.creds.registrationId, 4)),
+        node("type", {}, Uint8Array.from([5])),
+        node("identity", {}, remote.creds.signedIdentityKey.publicKey),
+        node("skey", {}, [
+          node("id", {}, be(remote.creds.signedPreKey.keyId, 3)),
+          node("value", {}, remote.creds.signedPreKey.keyPair.publicKey),
+          node("signature", {}, remote.creds.signedPreKey.signature),
+        ]),
+        node("key", {}, [node("id", {}, be(9191, 3)), node("value", {}, otkPub)]),
+      ]),
+    ]),
+  ]);
+}
+
+// --- envio em grupo com groupDevices: fana o SKDM p/ device sem sessão -----
+{
+  const G = "999000111@g.us";
+  const gdAuth = memoryAuthState();
+  gdAuth.creds.me = { id: "5511333330000@s.whatsapp.net" };
+  const gdSent: BinaryNode[] = [];
+
+  const NEW = "5511222221111@s.whatsapp.net"; // membro que nunca falou
+  const newAuth = memoryAuthState();
+  const newDeps: SignalDeps = { c: C, curve: makeCurve(C), storage: makeSignalStorage(newAuth) };
+  const newOtk = C.generateX25519();
+  await newAuth.keys.set({ "pre-key": { "9191": { public: newOtk.publicKey, private: newOtk.privateKey } } });
+
+  const query = async (n: BinaryNode) => bundleIq(newAuth, NEW, newOtk.publicKey, n.attrs.id ?? "1");
+  let askedGroup = "";
+  const groupDevices = async (jid: string) => { askedGroup = jid; return [NEW]; };
+
+  const gdLayer = createMessagesLayer({
+    events: new Emitter(), auth: gdAuth, crypto: C,
+    sendNode: (x) => gdSent.push(x),
+    genId: (() => { let i = 0; return () => `gd-${i++}`; })(),
+    query, groupDevices,
+  });
+
+  await gdLayer.sendMessage(G, { conversation: "oi grupo" });
+
+  ok("grupo+groupDevices: resolveu os devices do grupo", askedGroup === G);
+  const gm = gdSent.find((x) => x.tag === "message" && x.attrs.to === G);
+  const to = getBinaryNodeChildren(getBinaryNodeChild(gm, "participants"), "to")[0];
+  ok("grupo+groupDevices: SKDM fanou p/ o membro novo (cold-send)", to?.attrs.jid === NEW);
+  ok("grupo+groupDevices: enc pkmsg (sessão recém-aberta)", getBinaryNodeChild(to, "enc")?.attrs.type === "pkmsg");
+  ok("grupo+groupDevices: <enc type=skmsg> presente", getBinaryNodeChildren(gm, "enc").some((e) => e.attrs.type === "skmsg"));
+
+  // o membro novo decifra: SKDM + skmsg
+  const rec = new SenderKeyRecord();
+  const pw = unpad(await decryptPreKeyWhisperMessage(newDeps, coldAddr(gdAuth), getBinaryNodeChild(to, "enc")!.content as Uint8Array));
+  const skdm = decodeE2EMessage(pw).senderKeyDistributionMessage;
+  processSenderKeyDistribution(rec, skdm!.axolotlSenderKeyDistributionMessage!);
+  const sk = getBinaryNodeChildren(gm, "enc").find((e) => e.attrs.type === "skmsg");
+  const clear = decodeE2EMessage(unpad(groupDecrypt(C, rec, sk!.content as Uint8Array)));
+  ok("grupo+groupDevices: membro novo decifra o texto", clear.conversation === "oi grupo", JSON.stringify(clear));
+}
+
 // --- canal (@newsletter): <plaintext> sem Signal → messages.upsert ---------
 {
   const CHAN = "120363000000000001@newsletter";

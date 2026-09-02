@@ -16,7 +16,9 @@
 
 import { getBinaryNodeChild, getBinaryNodeChildren, node, type BinaryNode } from "../frame/node";
 import { utf8Decode } from "../frame/buffer";
+import { isJidGroup } from "../frame/jid";
 import { jidNormalizedUser } from "../usync";
+import type { Emitter } from "../events/emitter";
 
 export interface GroupParticipant {
   jid: string;
@@ -118,6 +120,86 @@ export function extractGroupMetadata(iqResult: BinaryNode): GroupMetadata {
     ephemeralDuration: num(getBinaryNodeChild(group, "ephemeral")?.attrs.expiration),
     participants,
   };
+}
+
+// --- <notification type="w:gp2"> → groups.update / group-participants.update ---
+
+const PARTICIPANT_ACTIONS = {
+  add: "add",
+  remove: "remove",
+  promote: "promote",
+  demote: "demote",
+} as const;
+
+export interface GroupNotificationOptions {
+  events: Emitter;
+  /** Chamado quando a composição do grupo muda (add/remove/promote/demote),
+   *  para invalidar caches de device-list / SKDM. */
+  onMembershipChange?: (groupJid: string) => void;
+}
+
+/** Trata um `<notification type="w:gp2">` de um grupo. Devolve `true` se
+ *  reconheceu algo. Espelha `handleGroupNotification` da Baileys, no mínimo:
+ *  add/remove/promote/demote de participante, e mudança de subject / descrição /
+ *  announce / locked / ephemeral. */
+export function handleGroupNotification(
+  stanza: BinaryNode,
+  o: GroupNotificationOptions,
+): boolean {
+  const from = stanza.attrs.from;
+  if (!from || !isJidGroup(from)) return false;
+  const author = stanza.attrs.participant;
+  const children = Array.isArray(stanza.content) ? stanza.content : [];
+  let handled = false;
+  const meta: { id: string } & Record<string, unknown> = { id: from };
+
+  for (const child of children) {
+    const tag = child.tag;
+    if (tag in PARTICIPANT_ACTIONS) {
+      const participants = getBinaryNodeChildren(child, "participant")
+        .map((p) => p.attrs.jid)
+        .filter((j): j is string => !!j);
+      o.events.emit("group-participants.update", {
+        id: from,
+        author,
+        participants,
+        action: PARTICIPANT_ACTIONS[tag as keyof typeof PARTICIPANT_ACTIONS],
+      });
+      if (tag === "add" || tag === "remove") o.onMembershipChange?.(from);
+      handled = true;
+    } else if (tag === "subject") {
+      meta.subject = child.attrs.subject;
+      meta.subjectTime = num(child.attrs.s_t);
+      meta.subjectOwner = author;
+      handled = true;
+    } else if (tag === "description") {
+      meta.desc = textOf(getBinaryNodeChild(child, "body"));
+      meta.descId = child.attrs.id;
+      handled = true;
+    } else if (tag === "announce" || tag === "not_announce") {
+      meta.announce = tag === "announce";
+      handled = true;
+    } else if (tag === "locked" || tag === "unlocked") {
+      meta.restrict = tag === "locked";
+      handled = true;
+    } else if (tag === "ephemeral" || tag === "not_ephemeral") {
+      meta.ephemeralDuration = tag === "ephemeral" ? num(child.attrs.expiration) ?? 0 : 0;
+      handled = true;
+    } else if (tag === "create") {
+      const g = getBinaryNodeChild(child, "group");
+      if (g) {
+        try {
+          o.events.emit("groups.update", [extractGroupMetadata(child) as unknown as { id: string }]);
+          handled = true;
+        } catch {
+          /* create malformado — ignora */
+        }
+      }
+    }
+  }
+
+  if (Object.keys(meta).length > 1) o.events.emit("groups.update", [meta]);
+  return handled;
 }
 
 export function createGroupsLayer(o: GroupsLayerOptions): GroupsLayer {

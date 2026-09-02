@@ -1,9 +1,10 @@
 // Camada de grupos (src/groups/index.ts): monta o <iq xmlns="w:g2"> e parseia
 // o <group>. `query` é um dublê.
 
-import { createGroupsLayer, extractGroupMetadata } from "../src/groups";
+import { createGroupsLayer, extractGroupMetadata, handleGroupNotification } from "../src/groups";
 import { getBinaryNodeChild, node, type BinaryNode } from "../src/frame/node";
 import { utf8Encode } from "../src/frame/buffer";
+import { Emitter } from "../src/events/emitter";
 
 let pass = 0;
 let fail = 0;
@@ -104,6 +105,56 @@ const groups = createGroupsLayer({ query });
     threw = (e as Error).message;
   }
   ok("resposta de erro lança com code+text", threw.includes("404") && threw.includes("group not found"), threw);
+}
+
+// --- <notification type="w:gp2"> ---------------------------------
+{
+  const ev = new Emitter();
+  const parts: any[] = [];
+  const grpUp: any[] = [];
+  ev.on("group-participants.update", (u) => parts.push(u));
+  ev.on("groups.update", (u) => grpUp.push(u));
+  let invalidated = "";
+  const opts = { events: ev, onMembershipChange: (g: string) => (invalidated = g) };
+  const X = "5511777777777@s.whatsapp.net";
+
+  const h1 = handleGroupNotification(
+    node("notification", { type: "w:gp2", from: GID, participant: OWNER }, [
+      node("add", {}, [node("participant", { jid: X })]),
+    ]),
+    opts,
+  );
+  ok("add: handled=true", h1 === true);
+  ok("add: group-participants.update action=add", parts[0]?.action === "add" && parts[0]?.participants?.[0] === X);
+  ok("add: author = participant da stanza", parts[0]?.author === OWNER);
+  ok("add: onMembershipChange chamado", invalidated === GID);
+
+  invalidated = "";
+  handleGroupNotification(
+    node("notification", { type: "w:gp2", from: GID, participant: OWNER }, [
+      node("promote", {}, [node("participant", { jid: X })]),
+    ]),
+    opts,
+  );
+  ok("promote: action=promote", parts[1]?.action === "promote");
+  ok("promote: NÃO invalida device cache", invalidated === "");
+
+  handleGroupNotification(
+    node("notification", { type: "w:gp2", from: GID, participant: OWNER }, [
+      node("subject", { subject: "Novo Nome", s_t: "1700000500" }),
+    ]),
+    opts,
+  );
+  const gu = grpUp[grpUp.length - 1]?.[0];
+  ok("subject: groups.update {id, subject, subjectOwner}", gu?.id === GID && gu?.subject === "Novo Nome" && gu?.subjectOwner === OWNER);
+
+  handleGroupNotification(
+    node("notification", { type: "w:gp2", from: GID }, [node("announce", {})]),
+    opts,
+  );
+  ok("announce: groups.update announce=true", grpUp[grpUp.length - 1]?.[0]?.announce === true);
+
+  ok("from não-grupo → handled=false", handleGroupNotification(node("notification", { type: "w:gp2", from: OWNER }, [node("add", {})]), opts) === false);
 }
 
 const rt =

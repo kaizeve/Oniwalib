@@ -33,6 +33,7 @@ import {
 import { createUSyncLayer, type USyncLayer } from "./usync";
 import {
   createGroupsLayer,
+  handleGroupNotification,
   type GroupsLayer,
   type GroupMetadata,
   type GroupParticipant,
@@ -267,6 +268,40 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     });
   };
 
+  // USYNC — device list de um número (cold-send / fan-out de SKDM em grupo).
+  const usync: USyncLayer = createUSyncLayer({ query, crypto: c });
+
+  // GRUPOS — metadata via `<iq xmlns="w:g2">` (participantes, admin, comunidade).
+  const groups: GroupsLayer = createGroupsLayer({ query });
+
+  // Cache curto da lista de device-jids por grupo (metadata + USYNC são caros).
+  // Invalidado quando chega um `<notification w:gp2>` de add/remove.
+  const groupDeviceCache = new Map<string, { devices: string[]; at: number }>();
+  const GROUP_DEVICE_TTL = 5 * 60 * 1000;
+
+  const resolveGroupDeviceJids = async (groupJid: string): Promise<string[]> => {
+    const hit = groupDeviceCache.get(groupJid);
+    if (hit && Date.now() - hit.at < GROUP_DEVICE_TTL) return hit.devices;
+
+    const meta = await groups.groupMetadata(groupJid);
+    const meUser = jidDecode(auth.creds.me?.id)?.user;
+    const users = meta.participants
+      .map((p) => p.jid)
+      .filter((j) => jidDecode(j)?.user && jidDecode(j)?.user !== meUser);
+
+    const devices = users.length ? await usync.getDeviceList(users) : {};
+    const targets: string[] = [];
+    for (const [user, ids] of Object.entries(devices)) {
+      const d = jidDecode(user);
+      if (!d?.user) continue;
+      for (const id of ids.length ? ids : [0]) {
+        targets.push(id === 0 ? user : `${d.user}:${id}@${d.server}`);
+      }
+    }
+    groupDeviceCache.set(groupJid, { devices: targets, at: Date.now() });
+    return targets;
+  };
+
   // Camada de mensagem (Signal): decifra <message>, cifra sendText, sobe
   // pré-chaves. Só faz sentido depois do <success>; antes disso `send` lança.
   const messages: MessagesLayer = createMessagesLayer({
@@ -276,6 +311,7 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     sendNode: send,
     genId,
     query,
+    groupDevices: resolveGroupDeviceJids,
     saveCreds: opts.saveCreds,
   });
   let preKeysUploaded = false;
@@ -293,12 +329,6 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
 
   // Privacidade da conta (confirmações de leitura, visto por último, foto…).
   const privacy: PrivacyLayer = createPrivacyLayer({ query });
-
-  // USYNC — device list de um número (cold-send / fan-out de SKDM em grupo).
-  const usync: USyncLayer = createUSyncLayer({ query, crypto: c });
-
-  // GRUPOS — metadata via `<iq xmlns="w:g2">` (participantes, admin, comunidade).
-  const groups: GroupsLayer = createGroupsLayer({ query });
 
   // Presença (online/digitando) e notificações de perfil (foto/recado). Só
   // fazem sentido depois do <success>; antes disso `send` lança.
@@ -551,6 +581,15 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
       case "notification":
         if (n.attrs.type === "encrypt") {
           void messages.onEncryptNotification().catch(() => {});
+        } else if (n.attrs.type === "w:gp2") {
+          try {
+            handleGroupNotification(n, {
+              events,
+              onMembershipChange: (gjid) => groupDeviceCache.delete(gjid),
+            });
+          } catch {
+            /* notificação de grupo malformada — só ackeia */
+          }
         } else {
           try {
             notifications.handleNotification(n);
@@ -634,30 +673,14 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
       });
   };
 
-  // metadata do grupo → USYNC de todos os participantes → cold-send dos que
-  // faltam. O `sendGroupMessage` do messages.ts então acha sessão pra todo
-  // device e fana o SKDM pra todos (não só pros "alcançáveis").
+  // `assertGroupSessions` = `resolveGroupDeviceJids` (metadata + USYNC, cacheado,
+  // definido lá em cima) + cold-send dos devices sem sessão. Rode uma vez (ex.:
+  // ao entrar num grupo) e o próximo `sendGroupMessage` alcança todo mundo.
   const assertGroupSessions = async (
     groupJid: string,
   ): Promise<{ opened: number; missing: number }> => {
-    const meta = await groups.groupMetadata(groupJid);
-    const meUser = jidDecode(auth.creds.me?.id)?.user;
-    const users = meta.participants
-      .map((p) => p.jid)
-      .filter((j) => jidDecode(j)?.user !== meUser);
-    if (users.length === 0) return { opened: 0, missing: 0 };
-
-    const devices = await usync.getDeviceList(users);
-    const targets: string[] = [];
-    for (const [user, ids] of Object.entries(devices)) {
-      const d = jidDecode(user);
-      if (!d?.user) continue;
-      for (const id of ids.length ? ids : [0]) {
-        targets.push(id === 0 ? user : `${d.user}:${id}@${d.server}`);
-      }
-    }
+    const targets = await resolveGroupDeviceJids(groupJid);
     if (targets.length === 0) return { opened: 0, missing: 0 };
-
     const stillMissing = await messages.assertSessions(targets);
     return { opened: targets.length - stillMissing.length, missing: stillMissing.length };
   };
