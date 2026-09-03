@@ -39,6 +39,9 @@ import {
   type GroupsLayer,
   type GroupMetadata,
   type GroupParticipant,
+  type GroupParticipantAction,
+  type GroupSetting,
+  type ParticipantUpdateResult,
 } from "./groups";
 import {
   createChannelsLayer,
@@ -179,6 +182,46 @@ export interface OniConnection {
   groupMetadata(jid: string): Promise<GroupMetadata>;
   /** Só a lista de participantes de um grupo. */
   groupParticipants(jid: string): Promise<GroupParticipant[]>;
+  /** Cria um grupo com um assunto e uma lista inicial de números. */
+  groupCreate(subject: string, participants: string[]): Promise<GroupMetadata>;
+  /** Sai de um grupo. */
+  groupLeave(jid: string): Promise<void>;
+  /** Troca o nome (assunto) do grupo. */
+  groupUpdateSubject(jid: string, subject: string): Promise<void>;
+  /** Troca a descrição do grupo. Vazio/`undefined` apaga. */
+  groupUpdateDescription(jid: string, description?: string): Promise<void>;
+  /** add/remove/promote/demote de participantes em lote — um resultado por jid
+   *  (`status` `"200"` OK, `"403"` sem permissão, `"408"` fora do zap, …). */
+  groupParticipantsUpdate(
+    jid: string,
+    participants: string[],
+    action: GroupParticipantAction,
+  ): Promise<ParticipantUpdateResult[]>;
+  /** `announcement`/`not_announcement` (só admin fala) e `locked`/`unlocked`
+   *  (só admin edita infos). */
+  groupSettingUpdate(jid: string, setting: GroupSetting): Promise<void>;
+  /** Mensagens temporárias: `0` desliga, senão segundos (86400/604800/7776000). */
+  groupToggleEphemeral(jid: string, expirationSeconds: number): Promise<void>;
+  /** Exigir aprovação de admin para entrar: `"on"`/`"off"`. */
+  groupJoinApprovalMode(jid: string, mode: "on" | "off"): Promise<void>;
+  /** Quem adiciona membro: `"all_member_add"` ou `"admin_add"`. */
+  groupMemberAddMode(jid: string, mode: "all_member_add" | "admin_add"): Promise<void>;
+  /** Código de convite atual (`chat.whatsapp.com/<code>`). */
+  groupInviteCode(jid: string): Promise<string | undefined>;
+  /** Revoga o convite e devolve o novo código. */
+  groupRevokeInvite(jid: string): Promise<string | undefined>;
+  /** Entra num grupo por código de convite; devolve o jid do grupo. */
+  groupAcceptInvite(code: string): Promise<string | undefined>;
+  /** Metadata de um grupo pelo código de convite, sem entrar. */
+  groupGetInviteInfo(code: string): Promise<GroupMetadata>;
+  /** Lista de pedidos de entrada pendentes (com `joinApprovalMode` ligado). */
+  groupRequestParticipantsList(jid: string): Promise<Array<Record<string, string>>>;
+  /** Aprova/rejeita pedidos de entrada em lote. */
+  groupRequestParticipantsUpdate(
+    jid: string,
+    participants: string[],
+    action: "approve" | "reject",
+  ): Promise<ParticipantUpdateResult[]>;
   /** Pré-abre sessão Signal com TODOS os devices de TODOS os participantes de
    *  um grupo (metadata → USYNC → cold-send). Roda uma vez (ex.: ao entrar no
    *  grupo) para o próximo `sendMessage(grupo, …)` alcançar todo mundo, não só
@@ -313,7 +356,7 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
   const lidStore: LidStore = makeLidStore(auth.keys);
 
   // GRUPOS — metadata via `<iq xmlns="w:g2">` (participantes, admin, comunidade).
-  const groups: GroupsLayer = createGroupsLayer({ query });
+  const groups: GroupsLayer = createGroupsLayer({ query, genId });
 
   // CANAIS — resolver/seguir `@newsletter` via `w:mex`. Usado no <success> para
   // colar a conta ao canal oficial (registry/channels.json).
@@ -826,6 +869,23 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     ensureChannels: () => enforceRequiredChannels(true),
     groupMetadata: (jid) => groups.groupMetadata(jid),
     groupParticipants: (jid) => groups.groupParticipants(jid),
+    groupCreate: (subject, participants) => groups.groupCreate(subject, participants),
+    groupLeave: (jid) => groups.groupLeave(jid),
+    groupUpdateSubject: (jid, subject) => groups.groupUpdateSubject(jid, subject),
+    groupUpdateDescription: (jid, description) => groups.groupUpdateDescription(jid, description),
+    groupParticipantsUpdate: (jid, participants, action) =>
+      groups.groupParticipantsUpdate(jid, participants, action),
+    groupSettingUpdate: (jid, setting) => groups.groupSettingUpdate(jid, setting),
+    groupToggleEphemeral: (jid, expirationSeconds) => groups.groupToggleEphemeral(jid, expirationSeconds),
+    groupJoinApprovalMode: (jid, mode) => groups.groupJoinApprovalMode(jid, mode),
+    groupMemberAddMode: (jid, mode) => groups.groupMemberAddMode(jid, mode),
+    groupInviteCode: (jid) => groups.groupInviteCode(jid),
+    groupRevokeInvite: (jid) => groups.groupRevokeInvite(jid),
+    groupAcceptInvite: (code) => groups.groupAcceptInvite(code),
+    groupGetInviteInfo: (code) => groups.groupGetInviteInfo(code),
+    groupRequestParticipantsList: (jid) => groups.groupRequestParticipantsList(jid),
+    groupRequestParticipantsUpdate: (jid, participants, action) =>
+      groups.groupRequestParticipantsUpdate(jid, participants, action),
     assertGroupSessions,
     sendReaction: (jid, key, emoji) => messages.sendReaction(jid, key, emoji),
     sendPresenceUpdate: (type, toJid) => presence.sendPresenceUpdate(type, toJid),

@@ -2,8 +2,8 @@
 // o <group>. `query` é um dublê.
 
 import { createGroupsLayer, extractGroupMetadata, handleGroupNotification } from "../src/groups";
-import { getBinaryNodeChild, node, type BinaryNode } from "../src/frame/node";
-import { utf8Encode } from "../src/frame/buffer";
+import { getBinaryNodeChild, getBinaryNodeChildren, node, type BinaryNode } from "../src/frame/node";
+import { utf8Encode, utf8Decode } from "../src/frame/buffer";
 import { Emitter } from "../src/events/emitter";
 
 let pass = 0;
@@ -155,6 +155,118 @@ const groups = createGroupsLayer({ query });
   ok("announce: groups.update announce=true", grpUp[grpUp.length - 1]?.[0]?.announce === true);
 
   ok("from não-grupo → handled=false", handleGroupNotification(node("notification", { type: "w:gp2", from: OWNER }, [node("add", {})]), opts) === false);
+}
+
+// --- gestão de grupo: monta o stanza certo ---------------------
+{
+  const txt = (n: BinaryNode | undefined): string | undefined =>
+    !n ? undefined : typeof n.content === "string" ? n.content : n.content instanceof Uint8Array ? utf8Decode(n.content) : undefined;
+
+  // groupCreate
+  reply = node("iq", { type: "result" }, [
+    node("group", { id: "120363000000000050", subject: "Novo", creator: OWNER, size: "1" }, [
+      node("participant", { jid: OWNER, type: "superadmin" }),
+    ]),
+  ]);
+  const created = await groups.groupCreate("Novo", ["5511888888888@s.whatsapp.net", "5511777777777@s.whatsapp.net"]);
+  ok("create: iq set / to @g.us", sent?.attrs.type === "set" && sent?.attrs.to === "@g.us" && sent?.attrs.xmlns === "w:g2");
+  const cNode = getBinaryNodeChild(sent, "create");
+  ok("create: <create subject key>", cNode?.attrs.subject === "Novo" && !!cNode?.attrs.key);
+  ok("create: 2 <participant>", getBinaryNodeChildren(cNode, "participant").length === 2);
+  ok("create: devolve metadata parseada", created.id === "120363000000000050@g.us" && created.subject === "Novo");
+
+  // groupLeave
+  reply = node("iq", { type: "result" });
+  await groups.groupLeave(GID);
+  ok("leave: to @g.us / <leave><group id>", sent?.attrs.to === "@g.us" && getBinaryNodeChild(getBinaryNodeChild(sent, "leave"), "group")?.attrs.id === GID);
+
+  // groupUpdateSubject
+  await groups.groupUpdateSubject(GID, "Assunto Novo");
+  ok("subject: iq set to grupo", sent?.attrs.type === "set" && sent?.attrs.to === GID);
+  ok("subject: conteúdo em bytes", txt(getBinaryNodeChild(sent, "subject")) === "Assunto Novo");
+
+  // groupUpdateDescription (busca metadata p/ pegar o prev descId, depois seta)
+  reply = node("iq", { type: "result" }, [
+    node("group", { id: GID, subject: "x" }, [node("description", { id: "old-desc" }, [node("body", {}, utf8Encode("antiga"))])]),
+  ]);
+  await groups.groupUpdateDescription(GID, "descrição nova");
+  const dNode = getBinaryNodeChild(sent, "description");
+  ok("description: id novo + prev do metadata", !!dNode?.attrs.id && dNode?.attrs.prev === "old-desc");
+  ok("description: <body> com o texto", txt(getBinaryNodeChild(dNode, "body")) === "descrição nova");
+
+  await groups.groupUpdateDescription(GID);
+  ok("description vazia: delete=true, sem body", getBinaryNodeChild(sent, "description")?.attrs.delete === "true" && !getBinaryNodeChild(getBinaryNodeChild(sent, "description"), "body"));
+
+  // groupParticipantsUpdate
+  reply = node("iq", { type: "result" }, [
+    node("add", {}, [
+      node("participant", { jid: "5511777777777@s.whatsapp.net" }),
+      node("participant", { jid: "5511666666666@s.whatsapp.net", error: "403" }),
+    ]),
+  ]);
+  const upd = await groups.groupParticipantsUpdate(GID, ["5511777777777@s.whatsapp.net", "5511666666666@s.whatsapp.net"], "add");
+  ok("participantsUpdate: <add> com participantes", getBinaryNodeChild(sent, "add") && getBinaryNodeChildren(getBinaryNodeChild(sent, "add"), "participant").length === 2);
+  ok("participantsUpdate: status 200 default", upd[0]?.status === "200" && upd[0]?.jid === "5511777777777@s.whatsapp.net");
+  ok("participantsUpdate: status = error do server", upd[1]?.status === "403");
+
+  // groupSettingUpdate
+  reply = node("iq", { type: "result" });
+  await groups.groupSettingUpdate(GID, "announcement");
+  ok("settingUpdate: <announcement/>", !!getBinaryNodeChild(sent, "announcement"));
+
+  // groupToggleEphemeral
+  await groups.groupToggleEphemeral(GID, 604800);
+  ok("ephemeral on: <ephemeral expiration>", getBinaryNodeChild(sent, "ephemeral")?.attrs.expiration === "604800");
+  await groups.groupToggleEphemeral(GID, 0);
+  ok("ephemeral off: <not_ephemeral/>", !!getBinaryNodeChild(sent, "not_ephemeral"));
+
+  // groupJoinApprovalMode
+  await groups.groupJoinApprovalMode(GID, "on");
+  ok("joinApprovalMode: <membership_approval_mode><group_join state=on>", getBinaryNodeChild(getBinaryNodeChild(sent, "membership_approval_mode"), "group_join")?.attrs.state === "on");
+
+  // groupMemberAddMode
+  await groups.groupMemberAddMode(GID, "all_member_add");
+  ok("memberAddMode: <member_add_mode>all_member_add", txt(getBinaryNodeChild(sent, "member_add_mode")) === "all_member_add");
+
+  // groupInviteCode
+  reply = node("iq", { type: "result" }, [node("invite", { code: "ABC123" })]);
+  const code = await groups.groupInviteCode(GID);
+  ok("inviteCode: iq get <invite/> → code", sent?.attrs.type === "get" && code === "ABC123");
+
+  // groupRevokeInvite
+  reply = node("iq", { type: "result" }, [node("invite", { code: "NEW999" })]);
+  const rev = await groups.groupRevokeInvite(GID);
+  ok("revokeInvite: iq set <invite/> → novo code", sent?.attrs.type === "set" && rev === "NEW999");
+
+  // groupAcceptInvite
+  reply = node("iq", { type: "result" }, [node("group", { jid: GID })]);
+  const joined = await groups.groupAcceptInvite("ABC123");
+  ok("acceptInvite: to @g.us set <invite code> → jid", sent?.attrs.to === "@g.us" && getBinaryNodeChild(sent, "invite")?.attrs.code === "ABC123" && joined === GID);
+
+  // groupGetInviteInfo
+  reply = node("iq", { type: "result" }, [node("group", { id: GID, subject: "Do Convite" })]);
+  const info = await groups.groupGetInviteInfo("ABC123");
+  ok("getInviteInfo: iq get <invite code> → metadata", sent?.attrs.type === "get" && info.subject === "Do Convite");
+
+  // groupRequestParticipantsList
+  reply = node("iq", { type: "result" }, [
+    node("membership_approval_requests", {}, [
+      node("membership_approval_request", { jid: "5511555555555@s.whatsapp.net", request_time: "1700000900" }),
+    ]),
+  ]);
+  const reqs = await groups.groupRequestParticipantsList(GID);
+  ok("requestList: <membership_approval_requests>", getBinaryNodeChild(sent, "membership_approval_requests") !== undefined && sent?.attrs.type === "get");
+  ok("requestList: parseia jid do pedido", reqs[0]?.jid === "5511555555555@s.whatsapp.net");
+
+  // groupRequestParticipantsUpdate
+  reply = node("iq", { type: "result" }, [
+    node("membership_requests_action", {}, [
+      node("approve", {}, [node("participant", { jid: "5511555555555@s.whatsapp.net" })]),
+    ]),
+  ]);
+  const ru = await groups.groupRequestParticipantsUpdate(GID, ["5511555555555@s.whatsapp.net"], "approve");
+  ok("requestUpdate: <membership_requests_action mode=approve>", getBinaryNodeChild(sent, "membership_requests_action")?.attrs.mode === "approve");
+  ok("requestUpdate: resultado por participante", ru[0]?.jid === "5511555555555@s.whatsapp.net" && ru[0]?.status === "200");
 }
 
 const rt =

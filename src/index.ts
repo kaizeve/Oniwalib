@@ -105,10 +105,15 @@ export {
 export {
   createGroupsLayer,
   extractGroupMetadata,
+  handleGroupNotification,
   type GroupsLayer,
   type GroupsLayerOptions,
   type GroupMetadata,
   type GroupParticipant,
+  type GroupParticipantAction,
+  type GroupSetting,
+  type ParticipantUpdateResult,
+  type GroupNotificationOptions,
 } from "./groups";
 
 export {

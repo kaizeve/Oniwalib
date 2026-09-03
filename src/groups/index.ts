@@ -15,7 +15,7 @@
 // `linkedParent` (o jid da comunidade, quando este é um subgrupo).
 
 import { getBinaryNodeChild, getBinaryNodeChildren, node, type BinaryNode } from "../frame/node";
-import { utf8Decode } from "../frame/buffer";
+import { utf8Decode, utf8Encode } from "../frame/buffer";
 import { isJidGroup } from "../frame/jid";
 import { jidNormalizedUser } from "../usync";
 import type { Emitter } from "../events/emitter";
@@ -61,13 +61,76 @@ export interface GroupMetadata {
 
 export interface GroupsLayerOptions {
   query: (n: BinaryNode, timeoutMs?: number) => Promise<BinaryNode>;
+  /** Gera um id curto (o mesmo `genId` do socket). Opcional — só é usado para o
+   *  `key` do `<create>` e o `id` do `<description>`; sem ele cai num contador. */
+  genId?: () => string;
 }
+
+/** Resultado de um add/remove/promote/demote por participante. `status` é o
+ *  código do servidor: `"200"` OK, `"403"` sem permissão, `"408"` fora do zap,
+ *  `"409"` já é membro, `"401"` te bloqueou… `content` é o `<participant>` cru
+ *  (às vezes traz um `<add_request>` com o código de convite). */
+export interface ParticipantUpdateResult {
+  jid: string;
+  status: string;
+  content: BinaryNode;
+}
+
+export type GroupParticipantAction = "add" | "remove" | "promote" | "demote";
+export type GroupSetting =
+  | "announcement"
+  | "not_announcement"
+  | "locked"
+  | "unlocked";
 
 export interface GroupsLayer {
   /** Metadata completa de um grupo/comunidade. */
   groupMetadata(jid: string): Promise<GroupMetadata>;
   /** Só a lista de participantes (atalho de `groupMetadata`). */
   groupParticipants(jid: string): Promise<GroupParticipant[]>;
+  /** Cria um grupo. `participants` são os números a adicionar de cara. */
+  groupCreate(subject: string, participants: string[]): Promise<GroupMetadata>;
+  /** Sai de um grupo. */
+  groupLeave(jid: string): Promise<void>;
+  /** Troca o assunto (nome) do grupo. */
+  groupUpdateSubject(jid: string, subject: string): Promise<void>;
+  /** Troca a descrição. String vazia / `undefined` apaga a descrição. */
+  groupUpdateDescription(jid: string, description?: string): Promise<void>;
+  /** add/remove/promote/demote em lote. Devolve um resultado por participante. */
+  groupParticipantsUpdate(
+    jid: string,
+    participants: string[],
+    action: GroupParticipantAction,
+  ): Promise<ParticipantUpdateResult[]>;
+  /** `announcement` = só admin fala · `locked` = só admin edita infos (e os
+   *  respectivos `not_`/`unlocked`). */
+  groupSettingUpdate(jid: string, setting: GroupSetting): Promise<void>;
+  /** Liga/desliga mensagens temporárias. `0` desliga; senão segundos
+   *  (86400 / 604800 / 7776000). */
+  groupToggleEphemeral(jid: string, expirationSeconds: number): Promise<void>;
+  /** Entrar no grupo precisa de aprovação de admin? `"on"` / `"off"`. */
+  groupJoinApprovalMode(jid: string, mode: "on" | "off"): Promise<void>;
+  /** Quem pode adicionar membro: todos ou só admin. */
+  groupMemberAddMode(
+    jid: string,
+    mode: "all_member_add" | "admin_add",
+  ): Promise<void>;
+  /** Código de convite atual (`chat.whatsapp.com/<code>`). */
+  groupInviteCode(jid: string): Promise<string | undefined>;
+  /** Revoga o convite e devolve o novo código. */
+  groupRevokeInvite(jid: string): Promise<string | undefined>;
+  /** Entra num grupo por código de convite. Devolve o jid do grupo. */
+  groupAcceptInvite(code: string): Promise<string | undefined>;
+  /** Metadata de um grupo a partir do código de convite (sem entrar). */
+  groupGetInviteInfo(code: string): Promise<GroupMetadata>;
+  /** Lista quem pediu para entrar (com `joinApprovalMode` ligado). */
+  groupRequestParticipantsList(jid: string): Promise<Array<Record<string, string>>>;
+  /** Aprova/rejeita pedidos de entrada em lote. */
+  groupRequestParticipantsUpdate(
+    jid: string,
+    participants: string[],
+    action: "approve" | "reject",
+  ): Promise<ParticipantUpdateResult[]>;
 }
 
 function textOf(n: BinaryNode | undefined): string | undefined {
@@ -209,15 +272,41 @@ export function handleGroupNotification(
   return handled;
 }
 
+const PARTICIPANTS_GROUP = "@g.us";
+
 export function createGroupsLayer(o: GroupsLayerOptions): GroupsLayer {
   const { query } = o;
+  let seq = 0;
+  const genId = o.genId ?? (() => `g${Date.now().toString(36)}${(seq++).toString(36)}`);
+
+  // `<iq type xmlns="w:g2" to=…>content</iq>` — o verbo comum da Baileys.
+  function groupQuery(
+    jid: string,
+    type: "get" | "set",
+    content: BinaryNode[],
+  ): Promise<BinaryNode> {
+    return query(node("iq", { to: jid, type, xmlns: "w:g2" }, content));
+  }
+
+  function participantNodes(jids: string[]): BinaryNode[] {
+    return jids.map((jid) => node("participant", { jid }));
+  }
+
+  // `<add|remove|…><participant jid error?/></…>` → um resultado por jid.
+  function parseParticipantResults(
+    res: BinaryNode,
+    tag: string,
+  ): ParticipantUpdateResult[] {
+    const wrap = getBinaryNodeChild(res, tag);
+    return getBinaryNodeChildren(wrap, "participant").map((p) => ({
+      jid: p.attrs.jid!,
+      status: p.attrs.error ?? "200",
+      content: p,
+    }));
+  }
 
   async function groupMetadata(jid: string): Promise<GroupMetadata> {
-    const res = await query(
-      node("iq", { to: jid, type: "get", xmlns: "w:g2" }, [
-        node("query", { request: "interactive" }),
-      ]),
-    );
+    const res = await groupQuery(jid, "get", [node("query", { request: "interactive" })]);
     return extractGroupMetadata(res);
   }
 
@@ -225,5 +314,159 @@ export function createGroupsLayer(o: GroupsLayerOptions): GroupsLayer {
     return (await groupMetadata(jid)).participants;
   }
 
-  return { groupMetadata, groupParticipants };
+  async function groupCreate(
+    subject: string,
+    participants: string[],
+  ): Promise<GroupMetadata> {
+    const res = await groupQuery(PARTICIPANTS_GROUP, "set", [
+      node("create", { subject, key: genId() }, participantNodes(participants)),
+    ]);
+    return extractGroupMetadata(res);
+  }
+
+  async function groupLeave(jid: string): Promise<void> {
+    await groupQuery(PARTICIPANTS_GROUP, "set", [
+      node("leave", {}, [node("group", { id: jid })]),
+    ]);
+  }
+
+  async function groupUpdateSubject(jid: string, subject: string): Promise<void> {
+    await groupQuery(jid, "set", [node("subject", {}, utf8Encode(subject))]);
+  }
+
+  async function groupUpdateDescription(
+    jid: string,
+    description?: string,
+  ): Promise<void> {
+    const prev = (await groupMetadata(jid)).descId;
+    const attrs: Record<string, string> = description
+      ? { id: genId() }
+      : { delete: "true" };
+    if (prev) attrs.prev = prev;
+    await groupQuery(jid, "set", [
+      node(
+        "description",
+        attrs,
+        description ? [node("body", {}, utf8Encode(description))] : undefined,
+      ),
+    ]);
+  }
+
+  async function groupParticipantsUpdate(
+    jid: string,
+    participants: string[],
+    action: GroupParticipantAction,
+  ): Promise<ParticipantUpdateResult[]> {
+    const res = await groupQuery(jid, "set", [
+      node(action, {}, participantNodes(participants)),
+    ]);
+    return parseParticipantResults(res, action);
+  }
+
+  async function groupSettingUpdate(
+    jid: string,
+    setting: GroupSetting,
+  ): Promise<void> {
+    await groupQuery(jid, "set", [node(setting, {})]);
+  }
+
+  async function groupToggleEphemeral(
+    jid: string,
+    expirationSeconds: number,
+  ): Promise<void> {
+    await groupQuery(jid, "set", [
+      expirationSeconds
+        ? node("ephemeral", { expiration: String(expirationSeconds) })
+        : node("not_ephemeral", {}),
+    ]);
+  }
+
+  async function groupJoinApprovalMode(
+    jid: string,
+    mode: "on" | "off",
+  ): Promise<void> {
+    await groupQuery(jid, "set", [
+      node("membership_approval_mode", {}, [node("group_join", { state: mode })]),
+    ]);
+  }
+
+  async function groupMemberAddMode(
+    jid: string,
+    mode: "all_member_add" | "admin_add",
+  ): Promise<void> {
+    await groupQuery(jid, "set", [node("member_add_mode", {}, utf8Encode(mode))]);
+  }
+
+  async function groupInviteCode(jid: string): Promise<string | undefined> {
+    const res = await groupQuery(jid, "get", [node("invite", {})]);
+    return getBinaryNodeChild(res, "invite")?.attrs.code;
+  }
+
+  async function groupRevokeInvite(jid: string): Promise<string | undefined> {
+    const res = await groupQuery(jid, "set", [node("invite", {})]);
+    return getBinaryNodeChild(res, "invite")?.attrs.code;
+  }
+
+  async function groupAcceptInvite(code: string): Promise<string | undefined> {
+    const res = await groupQuery(PARTICIPANTS_GROUP, "set", [node("invite", { code })]);
+    return getBinaryNodeChild(res, "group")?.attrs.jid;
+  }
+
+  async function groupGetInviteInfo(code: string): Promise<GroupMetadata> {
+    const res = await groupQuery(PARTICIPANTS_GROUP, "get", [node("invite", { code })]);
+    return extractGroupMetadata(res);
+  }
+
+  async function groupRequestParticipantsList(
+    jid: string,
+  ): Promise<Array<Record<string, string>>> {
+    const res = await groupQuery(jid, "get", [
+      node("membership_approval_requests", {}),
+    ]);
+    const wrap = getBinaryNodeChild(res, "membership_approval_requests");
+    return getBinaryNodeChildren(wrap, "membership_approval_request").map(
+      (p) => ({ ...p.attrs }),
+    );
+  }
+
+  async function groupRequestParticipantsUpdate(
+    jid: string,
+    participants: string[],
+    action: "approve" | "reject",
+  ): Promise<ParticipantUpdateResult[]> {
+    const res = await groupQuery(jid, "set", [
+      node(
+        "membership_requests_action",
+        { mode: action },
+        participantNodes(participants),
+      ),
+    ]);
+    const wrap = getBinaryNodeChild(res, "membership_requests_action");
+    const inner = getBinaryNodeChild(wrap, action);
+    return getBinaryNodeChildren(inner, "participant").map((p) => ({
+      jid: p.attrs.jid!,
+      status: p.attrs.error ?? "200",
+      content: p,
+    }));
+  }
+
+  return {
+    groupMetadata,
+    groupParticipants,
+    groupCreate,
+    groupLeave,
+    groupUpdateSubject,
+    groupUpdateDescription,
+    groupParticipantsUpdate,
+    groupSettingUpdate,
+    groupToggleEphemeral,
+    groupJoinApprovalMode,
+    groupMemberAddMode,
+    groupInviteCode,
+    groupRevokeInvite,
+    groupAcceptInvite,
+    groupGetInviteInfo,
+    groupRequestParticipantsList,
+    groupRequestParticipantsUpdate,
+  };
 }

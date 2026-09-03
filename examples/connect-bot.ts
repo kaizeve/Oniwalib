@@ -304,6 +304,95 @@ bot.register("nome", "troca o nome do perfil do bot (!nome <texto>)", async (arg
   return "trocar o nome do perfil ainda não dá (precisa de app-state sync). use !bio e !foto por enquanto.";
 });
 
+// --- gestão de grupo (só funciona rodado DENTRO de um grupo) ---------------
+const asGroup = (msg: IncomingMessage): string | undefined =>
+  msg.from.endsWith("@g.us") ? msg.from : undefined;
+// "5511999999999" | "+55 11 99999-9999" | "...@s.whatsapp.net" → jid
+const toJids = (args: string): string[] =>
+  args
+    .split(/[\s,]+/)
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .map((t) => (t.includes("@") ? t : `${t.replace(/\D/g, "")}@s.whatsapp.net`))
+    .filter((j) => /^\d{6,}@s\.whatsapp\.net$/.test(j));
+
+const partCmd =
+  (action: "add" | "remove" | "promote" | "demote") =>
+  async (args: string, msg: IncomingMessage): Promise<string> => {
+    const gid = asGroup(msg);
+    if (!gid) return "esse comando é só dentro de um grupo.";
+    const jids = toJids(args);
+    if (!jids.length) return `uso: !${action} <número> [número...]`;
+    try {
+      const res = await conn.groupParticipantsUpdate(gid, jids, action);
+      return res
+        .map((r) => `${r.jid.split("@")[0]}: ${r.status === "200" ? "ok" : r.status}`)
+        .join("\n");
+    } catch (e) {
+      return `falhou: ${(e as Error).message}`;
+    }
+  };
+
+bot.register("add", "adiciona alguém ao grupo (!add <número>)", partCmd("add"));
+bot.register("kick", "remove alguém do grupo (!kick <número>)", partCmd("remove"));
+bot.register("ban", "alias de !kick", partCmd("remove"));
+bot.register("promote", "vira admin (!promote <número>)", partCmd("promote"));
+bot.register("demote", "tira o admin (!demote <número>)", partCmd("demote"));
+
+bot.register("assunto", "troca o nome do grupo (!assunto <texto>)", async (args, msg) => {
+  const gid = asGroup(msg);
+  if (!gid) return "esse comando é só dentro de um grupo.";
+  if (!args.trim()) return "uso: !assunto <texto>";
+  await conn.groupUpdateSubject(gid, args.trim());
+  return "assunto trocado.";
+});
+
+bot.register("descricao", "troca a descrição do grupo (!descricao <texto>, vazio apaga)", async (args, msg) => {
+  const gid = asGroup(msg);
+  if (!gid) return "esse comando é só dentro de um grupo.";
+  await conn.groupUpdateDescription(gid, args.trim() || undefined);
+  return args.trim() ? "descrição trocada." : "descrição apagada.";
+});
+
+bot.register("link", "link de convite do grupo", async (_args, msg) => {
+  const gid = asGroup(msg);
+  if (!gid) return "esse comando é só dentro de um grupo.";
+  const code = await conn.groupInviteCode(gid);
+  return code ? `https://chat.whatsapp.com/${code}` : "não consegui pegar o link (sou admin?).";
+});
+
+bot.register("revogar", "revoga o link de convite atual", async (_args, msg) => {
+  const gid = asGroup(msg);
+  if (!gid) return "esse comando é só dentro de um grupo.";
+  const code = await conn.groupRevokeInvite(gid);
+  return code ? `link novo: https://chat.whatsapp.com/${code}` : "não consegui revogar.";
+});
+
+bot.register("sair", "o bot sai do grupo", async (_args, msg) => {
+  const gid = asGroup(msg);
+  if (!gid) return "esse comando é só dentro de um grupo.";
+  await conn.sendText(gid, "saindo, falou 👋");
+  await conn.groupLeave(gid);
+  return "";
+});
+
+bot.register("grupo", "mostra infos do grupo", async (_args, msg) => {
+  const gid = asGroup(msg);
+  if (!gid) return "esse comando é só dentro de um grupo.";
+  const m = await conn.groupMetadata(gid);
+  const admins = m.participants.filter((p) => p.admin).length;
+  return [
+    `📛 ${m.subject ?? "(sem nome)"}`,
+    `👥 ${m.size} membros · ${admins} admins`,
+    `📢 ${m.announce ? "só admin fala" : "todos falam"}`,
+    `🔒 ${m.restrict ? "só admin edita infos" : "todos editam infos"}`,
+    m.isCommunity ? "🏘️ é uma comunidade" : m.linkedParent ? "🏘️ subgrupo de comunidade" : "",
+    m.desc ? `\n${m.desc}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+});
+
 conn.events.on("connection.update", (u) => {
   if (u.qr) {
     console.log("\nescaneie (WhatsApp > Aparelhos conectados > Conectar um aparelho):\n");
