@@ -194,6 +194,54 @@ const JID = "120363000000000000@newsletter";
   ok("ensure: erro → action=failed, sem throw", r.action === "failed" && !!r.error);
 }
 
+// --- ações novas: unfollow / mute / unmute / create / delete / react ---
+{
+  const seen: Array<{ qid?: string; vars: any }> = [];
+  const last = () => seen[seen.length - 1];
+  function mkRes3(obj: unknown): BinaryNode {
+    return node("iq", { type: "result" }, [node("result", {}, utf8Encode(JSON.stringify(obj)))]);
+  }
+  const query3 = async (iq: BinaryNode): Promise<BinaryNode> => {
+    const q = getBinaryNodeChild(iq, "query")!;
+    const vars = JSON.parse(utf8Decode(q.content as Uint8Array)).variables;
+    seen.push({ qid: q.attrs.query_id, vars });
+    if (q.attrs.query_id === "6234210096708695") {
+      return mkRes3({ data: { xwa2_newsletter_create: { id: JID, thread_metadata: { name: { text: vars.input.name } } } } });
+    }
+    return mkRes3({ data: {} });
+  };
+  const sent3: BinaryNode[] = [];
+  const lastSent = () => sent3[sent3.length - 1]!;
+  const ch3 = createChannelsLayer({ query: query3, sendNode: (n) => sent3.push(n), genId: () => "GID1" });
+
+  await ch3.unfollowNewsletter(JID);
+  ok("unfollow: query_id + newsletter_id", last()?.qid === "7238632346214362" && last()?.vars.newsletter_id === JID);
+
+  await ch3.muteNewsletter(JID);
+  ok("mute: query_id", last()?.qid === "25151904754424642");
+  await ch3.unmuteNewsletter(JID);
+  ok("unmute: query_id", last()?.qid === "7337137176362961");
+
+  const created = await ch3.createNewsletter("Meu Canal", "desc");
+  ok("create: query_id + input.name/description", last()?.qid === "6234210096708695" && last()?.vars.input.name === "Meu Canal" && last()?.vars.input.description === "desc");
+  ok("create: devolve metadata com id", created.id === JID && created.name === "Meu Canal");
+
+  await ch3.deleteNewsletter(JID);
+  ok("delete: query_id", last()?.qid === "8316537688363079");
+
+  ch3.newsletterReactMessage(JID, 42, "🔥");
+  const rmsg = lastSent();
+  ok("react: <message to=jid type=reaction server_id id>", rmsg.tag === "message" && rmsg.attrs.to === JID && rmsg.attrs.type === "reaction" && rmsg.attrs.server_id === "42" && rmsg.attrs.id === "GID1");
+  const rchild = Array.isArray(rmsg.content) ? rmsg.content[0] : undefined;
+  ok("react: <reaction code>", (rchild as BinaryNode)?.tag === "reaction" && (rchild as BinaryNode)?.attrs.code === "🔥");
+  ok("react: sem edit attr quando reage", rmsg.attrs.edit === undefined);
+
+  ch3.newsletterReactMessage(JID, 42, "");
+  const rmsg2 = lastSent();
+  const rchild2 = Array.isArray(rmsg2.content) ? (rmsg2.content[0] as BinaryNode) : undefined;
+  ok("react vazio: edit=7 e <reaction> sem code", rmsg2.attrs.edit === "7" && !rchild2?.attrs.code);
+}
+
 const rt =
   typeof (globalThis as any).Bun !== "undefined"
     ? "bun"

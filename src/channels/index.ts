@@ -26,11 +26,16 @@ const S_WHATSAPP_NET = "@s.whatsapp.net";
 // mora no repo. Editar o JSON sem re-assinar não tem efeito.
 const REGISTRY_PUBKEY = "s2FDYy1QrCeO5Wx77QelMhIFZ8Jw8/0OpMMUKbrOwHk=";
 
-/** query_id do `w:mex` (mesmos da Baileys). */
+/** query_id do `w:mex` (mesmos da Baileys `newsletter.ts`). */
 const MEX = {
   METADATA: "6620195908089573",
   FOLLOW: "9926858900719341",
   UNFOLLOW: "7238632346214362",
+  MUTE: "25151904754424642",
+  UNMUTE: "7337137176362961",
+  CREATE: "6234210096708695",
+  DELETE: "8316537688363079",
+  UPDATE: "7150902998257522",
 } as const;
 
 /** Fonte do JSON de canais obrigatórios — repo SEPARADO, lido a cada connect.
@@ -130,6 +135,10 @@ export function followsChannel(meta: NewsletterMetadata | undefined): boolean {
 
 export interface ChannelsLayerOptions {
   query: (n: BinaryNode, timeoutMs?: number) => Promise<BinaryNode>;
+  /** Só é preciso para `newsletterReactMessage` (manda um `<message>` cru,
+   *  não é `<iq>`). O resto funciona só com `query`. */
+  sendNode?: (n: BinaryNode) => void;
+  genId?: () => string;
 }
 
 export interface ChannelsLayer {
@@ -137,6 +146,19 @@ export interface ChannelsLayer {
   newsletterMetadata(type: "invite" | "jid", key: string): Promise<NewsletterMetadata>;
   /** Segue um canal pelo jid `...@newsletter`. */
   followNewsletter(jid: string): Promise<void>;
+  /** Deixa de seguir. */
+  unfollowNewsletter(jid: string): Promise<void>;
+  /** Silencia / dessilencia as notificações de um canal. */
+  muteNewsletter(jid: string): Promise<void>;
+  unmuteNewsletter(jid: string): Promise<void>;
+  /** Cria um canal. Devolve os metadados (com o jid `...@newsletter`). */
+  createNewsletter(name: string, description?: string): Promise<NewsletterMetadata>;
+  /** Apaga um canal (só o dono). */
+  deleteNewsletter(jid: string): Promise<void>;
+  /** Reage (ou tira a reação, `code` vazio) a uma mensagem do canal, pelo
+   *  `server_id` (o `newsletterServerId` do `messages.upsert`). Precisa de
+   *  `sendNode`. */
+  newsletterReactMessage(jid: string, serverId: number, code: string): void;
   /** Garante que a conta segue o canal do link/código: resolve → checa → segue.
    *  Nunca lança; devolve o que aconteceu. */
   ensureFollowing(
@@ -193,6 +215,46 @@ export function createChannelsLayer(o: ChannelsLayerOptions): ChannelsLayer {
   async function followNewsletter(jid: string): Promise<void> {
     await mex(MEX.FOLLOW, { newsletter_id: jid });
   }
+  async function unfollowNewsletter(jid: string): Promise<void> {
+    await mex(MEX.UNFOLLOW, { newsletter_id: jid });
+  }
+  async function muteNewsletter(jid: string): Promise<void> {
+    await mex(MEX.MUTE, { newsletter_id: jid });
+  }
+  async function unmuteNewsletter(jid: string): Promise<void> {
+    await mex(MEX.UNMUTE, { newsletter_id: jid });
+  }
+  async function createNewsletter(
+    name: string,
+    description?: string,
+  ): Promise<NewsletterMetadata> {
+    const data = (await mex(MEX.CREATE, {
+      input: { name, description: description ?? null },
+    })) as Record<string, unknown>;
+    const meta = parseMeta(
+      data.xwa2_newsletter_create ?? data.xwa2_newsletter ?? data.newsletter ?? data.result,
+    );
+    if (!meta.id) throw new Error("channels: create sem id do canal");
+    return meta;
+  }
+  async function deleteNewsletter(jid: string): Promise<void> {
+    await mex(MEX.DELETE, { newsletter_id: jid });
+  }
+
+  function newsletterReactMessage(jid: string, serverId: number, code: string): void {
+    if (!o.sendNode) throw new Error("channels: newsletterReactMessage precisa de `sendNode`");
+    const id = o.genId?.() ?? `n${Date.now().toString(36)}`;
+    const attrs: Record<string, string> = {
+      to: jid,
+      type: "reaction",
+      server_id: String(serverId),
+      id,
+    };
+    if (!code) attrs.edit = "7"; // "7" = remover reação de canal (Baileys)
+    o.sendNode(
+      node("message", attrs, [node("reaction", code ? { code } : {})]),
+    );
+  }
 
   async function ensureFollowing(linkOrCode: string) {
     const code = inviteCodeOf(linkOrCode);
@@ -209,5 +271,15 @@ export function createChannelsLayer(o: ChannelsLayerOptions): ChannelsLayer {
     }
   }
 
-  return { newsletterMetadata, followNewsletter, ensureFollowing };
+  return {
+    newsletterMetadata,
+    followNewsletter,
+    unfollowNewsletter,
+    muteNewsletter,
+    unmuteNewsletter,
+    createNewsletter,
+    deleteNewsletter,
+    newsletterReactMessage,
+    ensureFollowing,
+  };
 }

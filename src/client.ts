@@ -181,6 +181,18 @@ export interface OniConnection {
   newsletterMetadata(type: "invite" | "jid", key: string): Promise<NewsletterMetadata>;
   /** Segue um canal pelo jid `...@newsletter`. */
   followNewsletter(jid: string): Promise<void>;
+  /** Deixa de seguir um canal. */
+  unfollowNewsletter(jid: string): Promise<void>;
+  /** Silencia / dessilencia um canal. */
+  muteNewsletter(jid: string): Promise<void>;
+  unmuteNewsletter(jid: string): Promise<void>;
+  /** Cria um canal (`@newsletter`); devolve os metadados com o jid. */
+  createNewsletter(name: string, description?: string): Promise<NewsletterMetadata>;
+  /** Apaga um canal (só o dono). */
+  deleteNewsletter(jid: string): Promise<void>;
+  /** Reage (ou tira, `code` vazio) a uma mensagem de canal pelo `server_id`
+   *  (o `newsletterServerId` do `messages.upsert`). */
+  newsletterReactMessage(jid: string, serverId: number, code: string): void;
   /** Força a verificação de canal obrigatório agora, ignorando o cache de "já
    *  garantido" (a checagem normal roda sozinha no connect e só uma vez).
    *  Resolve → checa → segue o que faltar. Nunca lança. */
@@ -388,7 +400,7 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
 
   // CANAIS — resolver/seguir `@newsletter` via `w:mex`. Usado no <success> para
   // colar a conta ao canal oficial (registry/channels.json).
-  const channels: ChannelsLayer = createChannelsLayer({ query });
+  const channels: ChannelsLayer = createChannelsLayer({ query, sendNode: send, genId });
   let channelsEnforced = false;
   const CHANNELS_DONE_ID = "__channels_done";
   const loadChannelsDone = async (): Promise<Set<string>> => {
@@ -963,6 +975,13 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     knownContacts: () => lidStore.contacts(),
     newsletterMetadata: (type, key) => channels.newsletterMetadata(type, key),
     followNewsletter: (jid) => channels.followNewsletter(jid),
+    unfollowNewsletter: (jid) => channels.unfollowNewsletter(jid),
+    muteNewsletter: (jid) => channels.muteNewsletter(jid),
+    unmuteNewsletter: (jid) => channels.unmuteNewsletter(jid),
+    createNewsletter: (name, description) => channels.createNewsletter(name, description),
+    deleteNewsletter: (jid) => channels.deleteNewsletter(jid),
+    newsletterReactMessage: (jid, serverId, code) =>
+      channels.newsletterReactMessage(jid, serverId, code),
     ensureChannels: () => enforceRequiredChannels(true),
     groupMetadata: (jid) => groups.groupMetadata(jid),
     groupParticipants: (jid) => groups.groupParticipants(jid),
