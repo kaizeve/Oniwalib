@@ -140,6 +140,7 @@ export interface E2EAudioMessage {
   directPath?: string;
   /** Unix em segundos — quando a `mediaKey` foi criada. */
   mediaKeyTimestamp?: number;
+  contextInfo?: E2EContextInfo;
 }
 
 /** ImageMessage (campo 3). Mesma cifra/upload do áudio (HKDF "WhatsApp Image
@@ -157,6 +158,7 @@ export interface E2EImageMessage {
   directPath?: string;
   mediaKeyTimestamp?: number;
   jpegThumbnail?: Uint8Array;
+  contextInfo?: E2EContextInfo;
 }
 
 /** VideoMessage (campo 9). HKDF "WhatsApp Video Keys". `gifPlayback` faz o
@@ -176,6 +178,7 @@ export interface E2EVideoMessage {
   directPath?: string;
   mediaKeyTimestamp?: number;
   jpegThumbnail?: Uint8Array;
+  contextInfo?: E2EContextInfo;
 }
 
 /** DocumentMessage (campo 7). HKDF "WhatsApp Document Keys". `fileName` é o que
@@ -194,6 +197,7 @@ export interface E2EDocumentMessage {
   mediaKeyTimestamp?: number;
   caption?: string;
   jpegThumbnail?: Uint8Array;
+  contextInfo?: E2EContextInfo;
 }
 
 /** StickerMessage (campo 26). HKDF "WhatsApp Image Keys", tipo de upload
@@ -210,16 +214,44 @@ export interface E2EStickerMessage {
   fileLength?: number;
   mediaKeyTimestamp?: number;
   isAnimated?: boolean;
+  contextInfo?: E2EContextInfo;
+}
+
+/** ContextInfo (campo 17 na maioria das sub-mensagens). O subconjunto que
+ *  importa pra bot: resposta citada (`stanzaId`+`participant`+`quotedMessage`),
+ *  menções (`mentionedJid`) e expiração de mensagem temporária. */
+export interface E2EContextInfo {
+  /** id da mensagem citada. */
+  stanzaId?: string;
+  /** jid de quem mandou a mensagem citada. */
+  participant?: string;
+  /** a mensagem citada em si (o cliente mostra o preview). */
+  quotedMessage?: E2EMessage;
+  remoteJid?: string;
+  /** jids @-mencionados (aparecem destacados e notificam). */
+  mentionedJid?: string[];
+  /** segundos de mensagem temporária. */
+  expiration?: number;
+  isForwarded?: boolean;
 }
 
 export interface E2EMessage {
   conversation?: string;
-  extendedTextMessage?: { text?: string };
+  extendedTextMessage?: { text?: string; contextInfo?: E2EContextInfo };
   audioMessage?: E2EAudioMessage;
   imageMessage?: E2EImageMessage;
   videoMessage?: E2EVideoMessage;
   documentMessage?: E2EDocumentMessage;
   stickerMessage?: E2EStickerMessage;
+  /** Container de álbum (campo 83): mande isto primeiro, depois cada mídia com
+   *  `messageContextInfo.messageAssociation` apontando para a key dele. */
+  albumMessage?: {
+    expectedImageCount?: number;
+    expectedVideoCount?: number;
+    contextInfo?: E2EContextInfo;
+  };
+  /** View-once V2 (campo 55) — embrulha uma mídia que some após ver. */
+  viewOnceMessageV2?: { message?: E2EMessage };
   deviceSentMessage?: { destinationJid?: string; message?: E2EMessage };
   senderKeyDistributionMessage?: {
     groupId?: string;
@@ -240,7 +272,16 @@ export interface E2EMessage {
     selectedDisplayText?: string;
     selectedIndex?: number;
   };
-  messageContextInfo?: { deviceListMetadataVersion?: number; messageSecret?: Uint8Array };
+  messageContextInfo?: {
+    deviceListMetadataVersion?: number;
+    messageSecret?: Uint8Array;
+    /** Liga uma mídia ao container de álbum (campo 10). */
+    messageAssociation?: {
+      /** 1 = MEDIA_ALBUM. */
+      associationType?: number;
+      parentMessageKey?: E2EMessageKey;
+    };
+  };
   interactiveMessage?: E2EInteractiveMessage;
   interactiveResponseMessage?: {
     body?: { text?: string };
@@ -277,6 +318,50 @@ function messageKeyWriter(k: E2EMessageKey): Writer {
   w.string(3, k.id);
   w.string(4, k.participant);
   return w;
+}
+
+/** ContextInfo (campo 17). Devolve `undefined` se não há nada a escrever. */
+function ctxWriter(ci: E2EContextInfo | undefined): Writer | undefined {
+  if (!ci) return undefined;
+  const has =
+    ci.stanzaId ||
+    ci.participant ||
+    ci.quotedMessage ||
+    ci.remoteJid ||
+    (ci.mentionedJid && ci.mentionedJid.length) ||
+    ci.expiration ||
+    ci.isForwarded;
+  if (!has) return undefined;
+  const w = new Writer();
+  w.string(1, ci.stanzaId);
+  w.string(2, ci.participant);
+  if (ci.quotedMessage) w.bytes(3, encodeE2EMessage(ci.quotedMessage));
+  w.string(4, ci.remoteJid);
+  for (const j of ci.mentionedJid ?? []) w.string(15, j);
+  if (ci.expiration) w.uint(25, ci.expiration);
+  if (ci.isForwarded) w.bool(22, true);
+  return w;
+}
+
+function decodeCtx(b: Uint8Array | undefined): E2EContextInfo | undefined {
+  if (!b) return undefined;
+  const f = new Reader(b).fields();
+  const out: E2EContextInfo = {};
+  const sid = f.get(1)?.[0];
+  if (sid instanceof Uint8Array) out.stanzaId = utf8Decode(sid);
+  const part = f.get(2)?.[0];
+  if (part instanceof Uint8Array) out.participant = utf8Decode(part);
+  const qm = f.get(3)?.[0];
+  if (qm instanceof Uint8Array) out.quotedMessage = decodeE2EMessage(qm);
+  const rj = f.get(4)?.[0];
+  if (rj instanceof Uint8Array) out.remoteJid = utf8Decode(rj);
+  const ment = (f.get(15) ?? []).filter((x) => x instanceof Uint8Array) as Uint8Array[];
+  if (ment.length) out.mentionedJid = ment.map((x) => utf8Decode(x));
+  const exp = f.get(25)?.[0];
+  if (typeof exp === "number") out.expiration = exp;
+  const fwd = f.get(22)?.[0];
+  if (typeof fwd === "number" && fwd !== 0) out.isForwarded = true;
+  return Object.keys(out).length ? out : undefined;
 }
 
 function decodeMessageKey(b: Uint8Array | undefined): E2EMessageKey | undefined {
@@ -352,7 +437,10 @@ export function encodeE2EMessage(m: E2EMessage): Uint8Array {
   const w = new Writer();
   if (m.conversation !== undefined) w.string(1, m.conversation);
   if (m.extendedTextMessage) {
-    w.message(6, new Writer().string(1, m.extendedTextMessage.text));
+    const sub = new Writer().string(1, m.extendedTextMessage.text);
+    const ctx = ctxWriter(m.extendedTextMessage.contextInfo);
+    if (ctx) sub.message(17, ctx);
+    w.message(6, sub);
   }
   if (m.audioMessage) {
     const a = m.audioMessage;
@@ -367,6 +455,7 @@ export function encodeE2EMessage(m: E2EMessage): Uint8Array {
     sub.bytes(8, a.fileEncSha256);
     sub.string(9, a.directPath);
     if (a.mediaKeyTimestamp !== undefined) sub.uint(10, a.mediaKeyTimestamp);
+    { const c = ctxWriter(a.contextInfo); if (c) sub.message(17, c); }
     w.message(8, sub);
   }
   if (m.imageMessage) {
@@ -384,6 +473,7 @@ export function encodeE2EMessage(m: E2EMessage): Uint8Array {
     sub.string(11, a.directPath);
     if (a.mediaKeyTimestamp !== undefined) sub.uint(12, a.mediaKeyTimestamp);
     sub.bytes(16, a.jpegThumbnail);
+    { const c = ctxWriter(a.contextInfo); if (c) sub.message(17, c); }
     w.message(3, sub);
   }
   if (m.documentMessage) {
@@ -402,6 +492,7 @@ export function encodeE2EMessage(m: E2EMessage): Uint8Array {
     if (a.mediaKeyTimestamp !== undefined) sub.uint(11, a.mediaKeyTimestamp);
     sub.bytes(16, a.jpegThumbnail);
     sub.string(20, a.caption);
+    { const c = ctxWriter(a.contextInfo); if (c) sub.message(17, c); }
     w.message(7, sub);
   }
   if (m.videoMessage) {
@@ -421,6 +512,7 @@ export function encodeE2EMessage(m: E2EMessage): Uint8Array {
     sub.string(13, a.directPath);
     if (a.mediaKeyTimestamp !== undefined) sub.uint(14, a.mediaKeyTimestamp);
     sub.bytes(16, a.jpegThumbnail);
+    { const c = ctxWriter(a.contextInfo); if (c) sub.message(17, c); }
     w.message(9, sub);
   }
   if (m.stickerMessage) {
@@ -437,6 +529,7 @@ export function encodeE2EMessage(m: E2EMessage): Uint8Array {
     if (a.fileLength !== undefined) sub.uint(9, a.fileLength);
     if (a.mediaKeyTimestamp !== undefined) sub.uint(10, a.mediaKeyTimestamp);
     if (a.isAnimated !== undefined) sub.bool(13, a.isAnimated);
+    { const c = ctxWriter(a.contextInfo); if (c) sub.message(17, c); }
     w.message(26, sub);
   }
   if (m.deviceSentMessage) {
@@ -470,6 +563,19 @@ export function encodeE2EMessage(m: E2EMessage): Uint8Array {
   }
   if (m.viewOnceMessage?.message) {
     w.message(37, new Writer().bytes(1, encodeE2EMessage(m.viewOnceMessage.message)));
+  }
+  if (m.viewOnceMessageV2?.message) {
+    w.message(55, new Writer().bytes(1, encodeE2EMessage(m.viewOnceMessageV2.message)));
+  }
+  if (m.albumMessage) {
+    const sub = new Writer();
+    if (m.albumMessage.expectedImageCount !== undefined)
+      sub.uint(2, m.albumMessage.expectedImageCount);
+    if (m.albumMessage.expectedVideoCount !== undefined)
+      sub.uint(3, m.albumMessage.expectedVideoCount);
+    const ctx = ctxWriter(m.albumMessage.contextInfo);
+    if (ctx) sub.message(17, ctx);
+    w.message(83, sub);
   }
   if (m.listResponseMessage) {
     const r = m.listResponseMessage;
@@ -510,6 +616,13 @@ export function encodeE2EMessage(m: E2EMessage): Uint8Array {
     if (m.messageContextInfo.deviceListMetadataVersion)
       sub.uint(2, m.messageContextInfo.deviceListMetadataVersion);
     sub.bytes(3, m.messageContextInfo.messageSecret);
+    const ma = m.messageContextInfo.messageAssociation;
+    if (ma) {
+      const maw = new Writer();
+      if (ma.associationType !== undefined) maw.uint(1, ma.associationType);
+      if (ma.parentMessageKey) maw.message(2, messageKeyWriter(ma.parentMessageKey));
+      sub.message(10, maw);
+    }
     w.message(35, sub);
   }
   if (m.interactiveMessage) {
@@ -587,7 +700,7 @@ export function decodeE2EMessage(bytes: Uint8Array): E2EMessage {
   const ext = asBytes(f.get(6)?.[0]);
   if (ext) {
     const sf = new Reader(ext).fields();
-    out.extendedTextMessage = { text: asStr(sf.get(1)?.[0]) };
+    out.extendedTextMessage = { text: asStr(sf.get(1)?.[0]), contextInfo: decodeCtx(asBytes(sf.get(17)?.[0])) };
   }
 
   const aud = asBytes(f.get(8)?.[0]);
@@ -608,6 +721,7 @@ export function decodeE2EMessage(bytes: Uint8Array): E2EMessage {
       fileEncSha256: asBytes(sf.get(8)?.[0]),
       directPath: asStr(sf.get(9)?.[0]),
       mediaKeyTimestamp: num(10),
+      contextInfo: decodeCtx(asBytes(sf.get(17)?.[0])),
     };
   }
 
@@ -628,6 +742,7 @@ export function decodeE2EMessage(bytes: Uint8Array): E2EMessage {
       directPath: asStr(sf.get(11)?.[0]),
       mediaKeyTimestamp: n(12),
       jpegThumbnail: asBytes(sf.get(16)?.[0]),
+      contextInfo: decodeCtx(asBytes(sf.get(17)?.[0])),
     };
   }
 
@@ -649,6 +764,7 @@ export function decodeE2EMessage(bytes: Uint8Array): E2EMessage {
       mediaKeyTimestamp: n(11),
       jpegThumbnail: asBytes(sf.get(16)?.[0]),
       caption: asStr(sf.get(20)?.[0]),
+      contextInfo: decodeCtx(asBytes(sf.get(17)?.[0])),
     };
   }
 
@@ -671,6 +787,7 @@ export function decodeE2EMessage(bytes: Uint8Array): E2EMessage {
       directPath: asStr(sf.get(13)?.[0]),
       mediaKeyTimestamp: n(14),
       jpegThumbnail: asBytes(sf.get(16)?.[0]),
+      contextInfo: decodeCtx(asBytes(sf.get(17)?.[0])),
     };
   }
 
@@ -690,6 +807,7 @@ export function decodeE2EMessage(bytes: Uint8Array): E2EMessage {
       fileLength: n(9),
       mediaKeyTimestamp: n(10),
       isAnimated: sf.get(13)?.[0] === 1,
+      contextInfo: decodeCtx(asBytes(sf.get(17)?.[0])),
     };
   }
 
@@ -743,6 +861,24 @@ export function decodeE2EMessage(bytes: Uint8Array): E2EMessage {
     const sf = new Reader(voc).fields();
     const inner = asBytes(sf.get(1)?.[0]);
     out.viewOnceMessage = { message: inner ? decodeE2EMessage(inner) : undefined };
+  }
+
+  const voc2 = asBytes(f.get(55)?.[0]);
+  if (voc2) {
+    const inner = asBytes(new Reader(voc2).fields().get(1)?.[0]);
+    out.viewOnceMessageV2 = { message: inner ? decodeE2EMessage(inner) : undefined };
+  }
+
+  const alb = asBytes(f.get(83)?.[0]);
+  if (alb) {
+    const sf = new Reader(alb).fields();
+    const ic = sf.get(2)?.[0];
+    const vc = sf.get(3)?.[0];
+    out.albumMessage = {
+      expectedImageCount: typeof ic === "number" ? ic : undefined,
+      expectedVideoCount: typeof vc === "number" ? vc : undefined,
+      contextInfo: decodeCtx(asBytes(sf.get(17)?.[0])),
+    };
   }
 
   const lrm = asBytes(f.get(39)?.[0]);
@@ -803,6 +939,15 @@ export function decodeE2EMessage(bytes: Uint8Array): E2EMessage {
       deviceListMetadataVersion: typeof v === "number" ? v : undefined,
       messageSecret: asBytes(sf.get(3)?.[0]),
     };
+    const maB = asBytes(sf.get(10)?.[0]);
+    if (maB) {
+      const mf = new Reader(maB).fields();
+      const at = mf.get(1)?.[0];
+      out.messageContextInfo.messageAssociation = {
+        associationType: typeof at === "number" ? at : undefined,
+        parentMessageKey: decodeMessageKey(asBytes(mf.get(2)?.[0])),
+      };
+    }
   }
 
   const inter = asBytes(f.get(45)?.[0]);

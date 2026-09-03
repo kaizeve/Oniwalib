@@ -68,6 +68,7 @@ export {
   createMessagesLayer,
   type MessagesLayer,
   type MessagesLayerOptions,
+  type SendOptions,
 } from "./messages";
 
 export {

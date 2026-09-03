@@ -13,7 +13,7 @@ import { decryptPollVote, resolvePollVote } from "./polls";
 import { decodeHistorySync } from "./history";
 import { connectOni } from "./connect";
 import { configureSuccessfulPairing } from "./pairing";
-import { createMessagesLayer, type MessagesLayer } from "./messages";
+import { createMessagesLayer, type MessagesLayer, type SendOptions } from "./messages";
 import { makeLidStore, type LidStore } from "./signal/lid";
 import {
   createMediaLayer,
@@ -122,11 +122,14 @@ export interface OniConnection {
   readonly events: Emitter;
   /** Envia um node cru na conexão ativa. Lança se não estiver aberta. */
   sendNode(n: BinaryNode): void;
-  /** Cifra e envia um texto 1:1. Precisa de sessão Signal já aberta com `jid`
-   *  (fase 1: responder quem mandou mensagem). Emite nada; devolve o id. */
-  sendText(jid: string, text: string): Promise<{ id: string }>;
+  /** Cifra e envia um texto 1:1 ou grupo. `opts` = resposta citada (`quoted`),
+   *  menções (`mentions`), mensagem temporária (`ephemeralExpiration`). */
+  sendText(jid: string, text: string, opts?: SendOptions): Promise<{ id: string }>;
   /** Como `sendText`, mas com um `Message` inteiro — botões, lista, viewOnce… */
-  sendMessage(jid: string, msg: E2EMessage): Promise<{ id: string }>;
+  sendMessage(jid: string, msg: E2EMessage, opts?: SendOptions): Promise<{ id: string }>;
+  /** Álbum: um container + N mídias ligadas. `items` são `imageMessage`/
+   *  `videoMessage` (use `buildImageMessage`/`buildVideoMessage`). */
+  sendAlbum(jid: string, items: E2EMessage[], opts?: SendOptions): Promise<{ albumId: string; ids: string[] }>;
   /** Edita uma mensagem nossa já enviada (`key` = a original). Vira um
    *  `protocolMessage` MESSAGE_EDIT; o outro lado recebe `messages.update`. */
   editMessage(jid: string, key: MessageKey, newText: string): Promise<{ id: string }>;
@@ -996,8 +999,9 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
   return {
     events,
     sendNode: send,
-    sendText: (jid, text) => messages.sendText(jid, text),
-    sendMessage: (jid, msg) => messages.sendMessage(jid, msg),
+    sendText: (jid, text, opts) => messages.sendText(jid, text, opts),
+    sendMessage: (jid, msg, opts) => messages.sendMessage(jid, msg, opts ? { opts } : undefined),
+    sendAlbum: (jid, items, opts) => messages.sendAlbum(jid, items, opts),
     editMessage: (jid, key, newText) => messages.editMessage(jid, key, newText),
     deleteMessage: (jid, key) => messages.deleteMessage(jid, key),
     sendPoll: (jid, name, options, selectableCount) =>

@@ -158,6 +158,48 @@ await layer.sendMessage(USER_JID, {
   ok("sendMessage cifra buttonsMessage", clear.buttonsMessage?.buttons?.[0]?.buttonId === "!ping");
 }
 
+// --- sendText com opts: quote + menções + efêmera ---
+sent.length = 0;
+{
+  await layer.sendText(USER_JID, "responde aí", {
+    quoted: { key: { remoteJid: USER_JID, fromMe: false, id: "m1" }, message: { conversation: "pergunta" } },
+    mentions: [USER_JID],
+    ephemeralExpiration: 86400,
+  });
+  const m = sent.find((n) => n.tag === "message");
+  const enc = getBinaryNodeChild(m, "enc");
+  const clear = decodeE2EMessage(
+    unpad(await decryptWhisperMessage(userDeps, "bot.0", enc!.content as Uint8Array)),
+  );
+  const ci = clear.extendedTextMessage?.contextInfo;
+  ok("opts: virou extendedTextMessage", clear.extendedTextMessage?.text === "responde aí");
+  ok("opts: quote stanzaId", ci?.stanzaId === "m1");
+  ok("opts: quotedMessage", ci?.quotedMessage?.conversation === "pergunta");
+  ok("opts: menção", ci?.mentionedJid?.[0] === USER_JID);
+  ok("opts: efêmera", ci?.expiration === 86400);
+}
+
+// --- sendAlbum: container + filhos com messageAssociation ---
+sent.length = 0;
+{
+  const img = (cap: string) => ({ imageMessage: { caption: cap, mediaKey: new Uint8Array(32) } });
+  const { albumId, ids } = await layer.sendAlbum(USER_JID, [img("um"), img("dois"), img("três")]);
+  ok("album: devolve albumId + 3 ids", !!albumId && ids.length === 3);
+  const msgs = sent.filter((n) => n.tag === "message");
+  ok("album: 4 <message> (1 container + 3)", msgs.length === 4);
+
+  const container = decodeE2EMessage(
+    unpad(await decryptWhisperMessage(userDeps, "bot.0", getBinaryNodeChild(msgs[0], "enc")!.content as Uint8Array)),
+  );
+  ok("album: container tem albumMessage(3 imgs)", container.albumMessage?.expectedImageCount === 3 && !container.albumMessage?.expectedVideoCount);
+
+  const child = decodeE2EMessage(
+    unpad(await decryptWhisperMessage(userDeps, "bot.0", getBinaryNodeChild(msgs[1], "enc")!.content as Uint8Array)),
+  );
+  ok("album: filho aponta pro container", child.messageContextInfo?.messageAssociation?.parentMessageKey?.id === albumId && child.messageContextInfo?.messageAssociation?.associationType === 1);
+  ok("album: filho mantém a imagem", child.imageMessage?.caption === "um");
+}
+
 // --- editMessage: protocolMessage MESSAGE_EDIT + edit="1" ---
 sent.length = 0;
 {

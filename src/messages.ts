@@ -83,16 +83,34 @@ export interface MessagesLayerOptions {
   saveCreds?: () => void | Promise<void>;
 }
 
+/** Opções comuns de envio: resposta citada, menções, mensagem temporária. */
+export interface SendOptions {
+  /** Cita uma mensagem: o cliente do outro lado mostra o "quote" em cima. */
+  quoted?: { key: MessageKey; message?: E2EMessage };
+  /** jids a @-mencionar (destacam e notificam). */
+  mentions?: string[];
+  /** Segundos de mensagem temporária (0 desliga). */
+  ephemeralExpiration?: number;
+  /** Marca como encaminhada. */
+  forwarded?: boolean;
+}
+
 export interface MessagesLayer {
   handleMessageStanza(stanza: BinaryNode): Promise<void>;
-  sendText(jid: string, text: string): Promise<{ id: string }>;
+  sendText(jid: string, text: string, opts?: SendOptions): Promise<{ id: string }>;
   /** Cifra e envia um `Message` qualquer (texto, botões, lista, …). `extra.id`
    *  força o id do `<message>`; `extra.editAttr` põe `edit="1"` (edição). */
   sendMessage(
     jid: string,
     msg: E2EMessage,
-    extra?: { id?: string; editAttr?: boolean },
+    extra?: { id?: string; editAttr?: boolean; opts?: SendOptions },
   ): Promise<{ id: string }>;
+  /** Álbum: manda o container e cada mídia ligada a ele. Devolve os ids. */
+  sendAlbum(
+    jid: string,
+    items: E2EMessage[],
+    opts?: SendOptions,
+  ): Promise<{ albumId: string; ids: string[] }>;
   /** Edita uma mensagem já enviada (só as nossas). `key` é a mensagem original;
    *  `newText` o novo texto. Vira um `protocolMessage` MESSAGE_EDIT (type 14). */
   editMessage(jid: string, key: MessageKey, newText: string): Promise<{ id: string }>;
@@ -567,8 +585,53 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     sendDeliveryReceipt(stanza);
   }
 
-  async function sendText(jid: string, text: string): Promise<{ id: string }> {
-    return sendMessage(jid, { conversation: text });
+  async function sendText(
+    jid: string,
+    text: string,
+    opts?: SendOptions,
+  ): Promise<{ id: string }> {
+    // com opções (quote/menção/efêmera) o texto vira extendedTextMessage, que é
+    // quem carrega o contextInfo.
+    const msg: E2EMessage = hasOpts(opts)
+      ? { extendedTextMessage: { text } }
+      : { conversation: text };
+    return sendMessage(jid, msg, opts ? { opts } : undefined);
+  }
+
+  function hasOpts(o?: SendOptions): boolean {
+    return !!o && (!!o.quoted || !!(o.mentions && o.mentions.length) || !!o.ephemeralExpiration || !!o.forwarded);
+  }
+
+  /** Aplica `SendOptions` no contextInfo da sub-mensagem primária. Muta `msg`. */
+  function applyOpts(msg: E2EMessage, opts?: SendOptions): E2EMessage {
+    if (!hasOpts(opts)) return msg;
+    const ci: NonNullable<E2EMessage["extendedTextMessage"]>["contextInfo"] = {};
+    if (opts!.quoted) {
+      ci.stanzaId = opts!.quoted.key.id;
+      ci.participant = opts!.quoted.key.participant ?? opts!.quoted.key.remoteJid;
+      ci.remoteJid = opts!.quoted.key.remoteJid;
+      if (opts!.quoted.message) ci.quotedMessage = opts!.quoted.message;
+    }
+    if (opts!.mentions?.length) ci.mentionedJid = opts!.mentions;
+    if (opts!.ephemeralExpiration) ci.expiration = opts!.ephemeralExpiration;
+    if (opts!.forwarded) ci.isForwarded = true;
+
+    const holder =
+      msg.extendedTextMessage ??
+      msg.imageMessage ??
+      msg.videoMessage ??
+      msg.audioMessage ??
+      msg.documentMessage ??
+      msg.stickerMessage ??
+      msg.albumMessage;
+    if (holder) {
+      holder.contextInfo = { ...(holder.contextInfo ?? {}), ...ci };
+    } else if (msg.conversation !== undefined) {
+      // conversation não tem contextInfo — promove p/ extendedTextMessage
+      msg.extendedTextMessage = { text: msg.conversation, contextInfo: ci };
+      delete msg.conversation;
+    }
+    return msg;
   }
 
   async function sendReaction(
@@ -647,8 +710,9 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
   async function sendMessage(
     jid: string,
     msg: E2EMessage,
-    extra?: { id?: string; editAttr?: boolean },
+    extra?: { id?: string; editAttr?: boolean; opts?: SendOptions },
   ): Promise<{ id: string }> {
+    if (extra?.opts) applyOpts(msg, extra.opts);
     if (isJidGroup(jid)) return sendGroupMessage(jid, msg, extra);
 
     const addr = signalAddress(jid);
@@ -725,6 +789,40 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     return { id, pollEncKey };
   }
 
+  async function sendAlbum(
+    jid: string,
+    items: E2EMessage[],
+    opts?: SendOptions,
+  ): Promise<{ albumId: string; ids: string[] }> {
+    const media = items.filter((m) => m.imageMessage || m.videoMessage);
+    if (media.length < 2) throw new Error("sendAlbum: precisa de pelo menos 2 imagens/vídeos");
+    const imageCount = media.filter((m) => m.imageMessage).length;
+    const videoCount = media.filter((m) => m.videoMessage).length;
+
+    const { id: albumId } = await sendMessage(
+      jid,
+      { albumMessage: { expectedImageCount: imageCount, expectedVideoCount: videoCount } },
+      opts ? { opts } : undefined,
+    );
+
+    const parentMessageKey: MessageKey = { remoteJid: jid, fromMe: true, id: albumId };
+
+    const ids: string[] = [];
+    for (const item of media) {
+      const withAssoc: E2EMessage = {
+        ...item,
+        messageContextInfo: {
+          ...(item.messageContextInfo ?? {}),
+          messageAssociation: { associationType: 1, parentMessageKey },
+        },
+      };
+      // eslint-disable-next-line no-await-in-loop
+      const r = await sendMessage(jid, withAssoc);
+      ids.push(r.id);
+    }
+    return { albumId, ids };
+  }
+
   async function deleteMessage(jid: string, key: MessageKey): Promise<{ id: string }> {
     return sendMessage(jid, {
       protocolMessage: {
@@ -752,7 +850,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
   async function sendGroupMessage(
     groupJid: string,
     msg: E2EMessage,
-    extra?: { id?: string; editAttr?: boolean },
+    extra?: { id?: string; editAttr?: boolean; opts?: SendOptions },
   ): Promise<{ id: string }> {
     // FORA do `serial`: se há resolvedor de devices do grupo (client.ts —
     // metadata + USYNC, com cache), abre sessão com todo device de todo membro
@@ -1049,6 +1147,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     handleMessageStanza,
     sendText,
     sendMessage,
+    sendAlbum,
     editMessage,
     deleteMessage,
     sendPoll,

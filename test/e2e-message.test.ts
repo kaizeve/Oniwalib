@@ -240,6 +240,72 @@ ok("conversation vira 0a026f69", hex(encodeE2EMessage({ conversation: "oi" })) =
   ok("protocolMessage timestampMs", edit.protocolMessage?.timestampMs === 1700000000123);
 }
 
+// contextInfo (campo 17) em extendedTextMessage: quote + menções + efêmera
+{
+  const enc = encodeE2EMessage({
+    extendedTextMessage: {
+      text: "olha isso @fulano",
+      contextInfo: {
+        stanzaId: "ORIG1",
+        participant: "5511999@s.whatsapp.net",
+        quotedMessage: { conversation: "mensagem original" },
+        mentionedJid: ["5511999@s.whatsapp.net"],
+        expiration: 604800,
+        isForwarded: true,
+      },
+    },
+  });
+  const back = decodeE2EMessage(enc);
+  const ci = back.extendedTextMessage?.contextInfo;
+  ok("ctx: stanzaId", ci?.stanzaId === "ORIG1");
+  ok("ctx: participant", ci?.participant === "5511999@s.whatsapp.net");
+  ok("ctx: quotedMessage aninhada", ci?.quotedMessage?.conversation === "mensagem original");
+  ok("ctx: mentionedJid", ci?.mentionedJid?.[0] === "5511999@s.whatsapp.net");
+  ok("ctx: expiration", ci?.expiration === 604800);
+  ok("ctx: isForwarded", ci?.isForwarded === true);
+  ok("messageText ainda pega o texto", messageText(back) === "olha isso @fulano");
+}
+
+// contextInfo em imageMessage
+{
+  const back = decodeE2EMessage(
+    encodeE2EMessage({
+      imageMessage: { caption: "foto", mediaKey: new Uint8Array(32), contextInfo: { stanzaId: "Q1" } },
+    }),
+  );
+  ok("image ctx round-trip", back.imageMessage?.contextInfo?.stanzaId === "Q1" && back.imageMessage?.caption === "foto");
+}
+
+// albumMessage (83) + messageAssociation (messageContextInfo campo 10)
+{
+  const album = decodeE2EMessage(
+    encodeE2EMessage({ albumMessage: { expectedImageCount: 2, expectedVideoCount: 1 } }),
+  );
+  ok("album: contagens", album.albumMessage?.expectedImageCount === 2 && album.albumMessage?.expectedVideoCount === 1);
+
+  const child = decodeE2EMessage(
+    encodeE2EMessage({
+      imageMessage: { mediaKey: new Uint8Array(32) },
+      messageContextInfo: {
+        messageAssociation: {
+          associationType: 1,
+          parentMessageKey: { remoteJid: "a@s.whatsapp.net", fromMe: true, id: "ALBUM1" },
+        },
+      },
+    }),
+  );
+  ok("assoc: type 1 (MEDIA_ALBUM)", child.messageContextInfo?.messageAssociation?.associationType === 1);
+  ok("assoc: parentMessageKey.id", child.messageContextInfo?.messageAssociation?.parentMessageKey?.id === "ALBUM1");
+}
+
+// viewOnceMessageV2 (55)
+{
+  const back = decodeE2EMessage(
+    encodeE2EMessage({ viewOnceMessageV2: { message: { imageMessage: { caption: "só uma vez" } } } }),
+  );
+  ok("viewOnceV2 aninhado", back.viewOnceMessageV2?.message?.imageMessage?.caption === "só uma vez");
+}
+
 const rt =
   typeof (globalThis as any).Bun !== "undefined"
     ? "bun"
