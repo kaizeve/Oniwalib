@@ -168,6 +168,14 @@ export {
   type HistoryChat,
 } from "./history";
 export {
+  makeInMemoryStore,
+  type InMemoryStore,
+  type StoreChat,
+  type StoreContact,
+  type StoreMessage,
+  type StoreSnapshot,
+} from "./store";
+export {
   createBlocklistLayer,
   parseBlocklist,
   type BlocklistLayer,
