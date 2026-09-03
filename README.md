@@ -9,7 +9,7 @@ It talks the socket directly — no browser, no Puppeteer, no headless Chrome.
 
 <br>
 
-[![tests](https://img.shields.io/badge/tests-954%2F954%20passing-2ea44f?style=flat-square)](#tests)
+[![tests](https://img.shields.io/badge/tests-959%2F959%20passing-2ea44f?style=flat-square)](#tests)
 [![runtimes](https://img.shields.io/badge/runs%20on-bun%20%C2%B7%20node%20%C2%B7%20RTS-0b7285?style=flat-square)](#status)
 [![language](https://img.shields.io/badge/TypeScript-3178c6?style=flat-square&logo=typescript&logoColor=white)](#)
 [![status](https://img.shields.io/badge/status-early%20%C2%B7%20foundation-d9822b?style=flat-square)](#status)
@@ -180,7 +180,7 @@ reply decrypted back; group read: standalone SKDM → `skmsg` → text; retry
 receipt with the full `<keys>` block on a decrypt miss; **cold-send** —
 `assertSessions` fetches the bundle and opens X3DH end to end; **channel**
 `<plaintext>` → `messages.upsert`; **status** `status@broadcast` sender-key
-fan-out) · `media` 66 (audio /
+fan-out) · `media` 71 (audio /
 image / video / document / sticker send: per-type HKDF → AES-CBC + 10-byte MAC,
 `media_conn` `<iq>`, upload POST with host fallback, `*Message` codec roundtrip;
 `downloadMedia` — GET by `url`/`directPath`, verify the 10-byte MAC and
@@ -196,7 +196,7 @@ community via `<parent>` / `<linked_parent>`) · `reaction` 19
 revoke → `messages.delete`; `sendReaction` encrypted back) · `pairing` 18 (the
 `<pair-success>` crypto both directions) ·
 `client` 18 (QR → pairing → `515` restart → login `<success>`, over the mock
-server) → **954 / 954 on bun**.
+server) → **959 / 959 on bun**.
 
 ### <a name="oni-version"></a>Keeping it working — the oni-version
 

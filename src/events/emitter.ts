@@ -38,6 +38,16 @@ export interface OniwalibEvents {
   };
   /** "Apagar para todos" (protocolMessage REVOKE). */
   "messages.delete": { keys: MessageKey[] };
+  /** Só com `openWhatsApp({ autoDownloadMedia: true })`. Uma mensagem de mídia
+   *  recebida já com o anexo baixado, decifrado e verificado — dispensa chamar
+   *  `conn.downloadMedia(m.message)`. A `messages.upsert` correspondente já saiu
+   *  antes. `error` vem preenchido (e `media` ausente) se o download falhou. */
+  "messages.media": {
+    key: MessageKey;
+    message: unknown;
+    media?: { data: Uint8Array; type: string; mimetype?: string };
+    error?: Error;
+  };
   /** Mensagem alterada — edição (protocolMessage MESSAGE_EDIT), estrela, etc.
    *  `update.message` traz o novo conteúdo quando é edição. */
   "messages.update": Array<{

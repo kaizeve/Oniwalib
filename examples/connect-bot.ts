@@ -61,6 +61,18 @@ const conn = openWhatsApp({
   profile: STOCK,
   countryCode: "BR",
   maxRetries: 1_000_000,
+  autoDownloadMedia: true, // mídia recebida já chega baixada em `messages.media`
+});
+
+conn.events.on("messages.media", ({ key, media, error }) => {
+  if (error) {
+    console.error(`✗ mídia de ${key.remoteJid} não baixou: ${error.message}`);
+    return;
+  }
+  console.log(
+    `📎 mídia de ${key.remoteJid}: ${media!.type} · ${media!.data.length} bytes` +
+      (media!.mimetype ? ` · ${media!.mimetype}` : ""),
+  );
 });
 
 // ── !play / !musica / !youtube ──────────────────────────────────────────────

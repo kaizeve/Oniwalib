@@ -414,6 +414,13 @@ export function createMediaLayer(o: MediaLayerOptions): MediaLayer {
   };
 }
 
+/** `true` se a mensagem carrega um anexo que `downloadMedia` sabe baixar
+ *  (imagem/vídeo/áudio/documento/figurinha, inclusive dentro de
+ *  `viewOnceMessage`/`deviceSentMessage`). Não tem efeito colateral. */
+export function hasDownloadableMedia(msg: E2EMessage): boolean {
+  return pickMedia(msg) !== undefined;
+}
+
 /** Qual sub-mensagem de mídia (se alguma) e seus campos de download. */
 function pickMedia(
   msg: E2EMessage,

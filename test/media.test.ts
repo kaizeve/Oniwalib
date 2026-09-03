@@ -3,7 +3,7 @@
 // `query` e o `fetch` são dublês que capturam o que a camada mandaria.
 
 import { crypto } from "../src/crypto";
-import { createMediaLayer } from "../src/media";
+import { createMediaLayer, hasDownloadableMedia } from "../src/media";
 import { node, getBinaryNodeChild, type BinaryNode } from "../src/frame/node";
 import { encodeE2EMessage, decodeE2EMessage } from "../src/proto/e2e-message";
 import { utf8Encode } from "../src/frame/buffer";
@@ -277,6 +277,16 @@ const ab = (u: Uint8Array): ArrayBuffer =>
     deviceSentMessage: { destinationJid: "x@s.whatsapp.net", message: { imageMessage: built } },
   });
   ok("download: desembrulha deviceSentMessage", eq(d.data, IMG));
+
+  // hasDownloadableMedia — o gate do autoDownloadMedia do client
+  ok("hasDownloadableMedia: imageMessage", hasDownloadableMedia({ imageMessage: built }));
+  ok("hasDownloadableMedia: dentro de viewOnceMessage",
+    hasDownloadableMedia({ viewOnceMessage: { message: { imageMessage: built } } }));
+  ok("hasDownloadableMedia: dentro de deviceSentMessage",
+    hasDownloadableMedia({ deviceSentMessage: { destinationJid: "x@s.whatsapp.net", message: { audioMessage: { mediaKey: new Uint8Array(32) } } } }));
+  ok("hasDownloadableMedia: texto puro → false", !hasDownloadableMedia({ conversation: "oi" }));
+  ok("hasDownloadableMedia: extendedTextMessage → false",
+    !hasDownloadableMedia({ extendedTextMessage: { text: "oi" } }));
 
   // directPath → monta a URL do host de mídia
   let seenUrl = "";

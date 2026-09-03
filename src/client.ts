@@ -25,6 +25,7 @@ import {
   type DocumentOptions,
   type StickerOptions,
   type DownloadedMedia,
+  hasDownloadableMedia,
 } from "./media";
 import { createProfileLayer, type ProfileLayer } from "./profile";
 import { createAppStateLayer, type AppStateLayer } from "./appstate/layer";
@@ -115,6 +116,11 @@ export interface OpenOptions {
    *  `WebMessageInfo` é grande). Default `true`. `false` = só a lista de chats
    *  e a contagem. */
   historyMessages?: boolean;
+  /** Baixa + decifra o anexo de TODA mensagem de mídia recebida e emite
+   *  `messages.media` com os bytes prontos — sem precisar chamar
+   *  `conn.downloadMedia(m.message)` na mão. Default `false` (gasta rede).
+   *  Precisa de `fetch`. */
+  autoDownloadMedia?: boolean;
   /** ms entre pings de keepalive. Default 25000. */
   keepAliveMs?: number;
   /** Máx. de reconexões automáticas seguidas antes de desistir. Default 5. */
@@ -692,6 +698,24 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
       for (const m of msgs) {
         if (m.key.fromMe || !m.message) continue;
         sendReceipt(m.key.remoteJid, [m.key.id], "read", m.key.participant);
+      }
+    });
+  }
+
+  // Baixa o anexo de toda mídia recebida e emite `messages.media` já pronto.
+  // Opt-in (gasta rede). A `messages.upsert` já saiu antes — este evento é um
+  // extra pra quem não quer chamar `downloadMedia` na mão.
+  if (opts.autoDownloadMedia) {
+    events.on("messages.upsert", ({ type, messages: msgs }) => {
+      if (type !== "notify") return;
+      for (const m of msgs) {
+        if (m.key.fromMe || !m.message || !hasDownloadableMedia(m.message as E2EMessage)) continue;
+        void media
+          .downloadMedia(m.message as E2EMessage)
+          .then((dl) => events.emit("messages.media", { key: m.key, message: m.message, media: dl }))
+          .catch((error: Error) =>
+            events.emit("messages.media", { key: m.key, message: m.message, error }),
+          );
       }
     });
   }
