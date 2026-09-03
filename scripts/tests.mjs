@@ -19,7 +19,7 @@ const FILES = [
   "version", "wire", "wabinary", "jid", "e2e-message", "crypto", "noise", "auth",
   "file-state", "socket", "signal", "lid", "sender-key", "prekeys", "messages", "media",
   "profile", "privacy", "usync", "groups", "appstate", "channels", "reaction", "presence",
-  "calls", "blocklist", "polls", "history", "store", "notifications", "bot", "pairing", "client",
+  "calls", "blocklist", "polls", "history", "store", "business", "notifications", "bot", "pairing", "client",
 ];
 
 const rts = process.argv.includes("--rts");

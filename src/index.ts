@@ -182,6 +182,17 @@ export {
   type BlocklistLayer,
   type BlocklistLayerOptions,
 } from "./blocklist";
+export {
+  createBusinessLayer,
+  parseCatalogNode,
+  type BusinessLayer,
+  type BusinessLayerOptions,
+  type BusinessProfile,
+  type Catalog,
+  type CatalogProduct,
+  type Collection,
+  type OrderDetails,
+} from "./business";
 
 export {
   createChannelsLayer,

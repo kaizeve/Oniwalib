@@ -32,6 +32,14 @@ import type { ChatModification, WAPatchName } from "./appstate";
 import { createCallsLayer, type CallsLayer } from "./calls";
 import { createBlocklistLayer, type BlocklistLayer } from "./blocklist";
 import {
+  createBusinessLayer,
+  type BusinessLayer,
+  type BusinessProfile,
+  type Catalog,
+  type Collection,
+  type OrderDetails,
+} from "./business";
+import {
   createPrivacyLayer,
   type PrivacyLayer,
   type PrivacyCategory,
@@ -330,6 +338,14 @@ export interface OniConnection {
   updateBlockStatus(jid: string, action: "block" | "unblock"): Promise<void>;
   /** Recusa uma chamada recebida (do evento `call`: `rejectCall(c.id, c.chatId)`). */
   rejectCall(callId: string, callFrom: string): void;
+  /** Perfil comercial de um número Business (`<iq w:biz>`). */
+  getBusinessProfile(jid: string): Promise<BusinessProfile | undefined>;
+  /** Catálogo de produtos de um número Business. */
+  getCatalog(opts?: { jid?: string; limit?: number; cursor?: string }): Promise<Catalog>;
+  /** Coleções (agrupamentos de produtos) de um número Business. */
+  getCollections(jid?: string, limit?: number): Promise<Collection[]>;
+  /** Detalhes de um pedido (`orderId` + token do `orderMessage`). */
+  getOrderDetails(orderId: string, tokenBase64: string): Promise<OrderDetails>;
   /** Fecha e não reconecta. */
   end(err?: Error): void;
   readonly state: "connecting" | "open" | "close";
@@ -577,6 +593,7 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
   // Chamadas (só notifica + recusa; sem WebRTC) e blocklist da conta.
   const calls: CallsLayer = createCallsLayer({ events, sendNode: send });
   const blocklist: BlocklistLayer = createBlocklistLayer({ query, events });
+  const business: BusinessLayer = createBusinessLayer({ query, meId: () => auth.creds.me?.id });
 
   // Recibos de leitura (tick azul) e afins. `<receipt to=jid type=read
   // id=id0 [participant=...]>` + `<list><item id=.../></list>` para os demais
@@ -1069,6 +1086,10 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     fetchBlocklist: () => blocklist.fetchBlocklist(),
     updateBlockStatus: (jid, action) => blocklist.updateBlockStatus(jid, action),
     rejectCall: (callId, callFrom) => calls.rejectCall(callId, callFrom),
+    getBusinessProfile: (jid) => business.getBusinessProfile(jid),
+    getCatalog: (opts) => business.getCatalog(opts),
+    getCollections: (jid, limit) => business.getCollections(jid, limit),
+    getOrderDetails: (orderId, token) => business.getOrderDetails(orderId, token),
     postStatus: async (recipients, content) => {
       let msg: E2EMessage;
       if ("text" in content) {
