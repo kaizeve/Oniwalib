@@ -83,7 +83,7 @@ import {
   type BinaryNode,
 } from "./frame/node";
 import { utf8Decode } from "./frame/buffer";
-import { jidDecode } from "./frame/jid";
+import { jidDecode, isJidNewsletter } from "./frame/jid";
 
 const S_WHATSAPP_NET = "@s.whatsapp.net";
 const ACKABLE = new Set(["message", "receipt", "notification", "call", "ack"]);
@@ -736,12 +736,15 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
 
   // Baixa o anexo de toda mídia recebida e emite `messages.media` já pronto.
   // Opt-in (gasta rede). A `messages.upsert` já saiu antes — este evento é um
-  // extra pra quem não quer chamar `downloadMedia` na mão.
+  // extra pra quem não quer chamar `downloadMedia` na mão. NÃO baixa mídia de
+  // `status@broadcast` nem de canal por padrão (é o status/feed dos outros —
+  // baixar tudo isso é banda à toa); pra esses, chame `downloadMedia` na mão.
   if (opts.autoDownloadMedia) {
     events.on("messages.upsert", ({ type, messages: msgs }) => {
       if (type !== "notify") return;
       for (const m of msgs) {
         if (m.key.fromMe || !m.message || !hasDownloadableMedia(m.message as E2EMessage)) continue;
+        if (m.key.remoteJid === "status@broadcast" || isJidNewsletter(m.key.remoteJid)) continue;
         void media
           .downloadMedia(m.message as E2EMessage)
           .then((dl) => events.emit("messages.media", { key: m.key, message: m.message, media: dl }))
