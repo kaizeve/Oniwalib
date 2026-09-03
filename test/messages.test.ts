@@ -559,6 +559,51 @@ function bundleIq(remote: ReturnType<typeof memoryAuthState>, jid: string, otkPu
   ok("grupo+groupDevices: membro novo decifra o texto", clear.conversation === "oi grupo", JSON.stringify(clear));
 }
 
+// --- grupo lid-addressed: <to> por @lid + addressing_mode=lid --------------
+// resolveGroupDeviceJids (client.ts) devolve device-jids `@lid` quando o grupo
+// é lid-addressed; o fan-out tem que abrir sessão e endereçar por esse `@lid`,
+// senão volta o bug do `SKDM p/ 0 device(s)`.
+{
+  const G = "999000222@g.us";
+  const gdAuth = memoryAuthState();
+  gdAuth.creds.me = { id: "5511444440000@s.whatsapp.net" };
+  const gdSent: BinaryNode[] = [];
+
+  const LID = "77777777777777:3@lid"; // membro endereçado por lid, device 3
+  const memAuth = memoryAuthState();
+  const memDeps: SignalDeps = { c: C, curve: makeCurve(C), storage: makeSignalStorage(memAuth) };
+  const memOtk = C.generateX25519();
+  await memAuth.keys.set({ "pre-key": { "9191": { public: memOtk.publicKey, private: memOtk.privateKey } } });
+
+  const query = async (n: BinaryNode) => bundleIq(memAuth, LID, memOtk.publicKey, n.attrs.id ?? "1");
+  const groupDevices = async () => [LID];
+
+  const layer = createMessagesLayer({
+    events: new Emitter(), auth: gdAuth, crypto: C,
+    sendNode: (x) => gdSent.push(x),
+    genId: (() => { let i = 0; return () => `gl-${i++}`; })(),
+    query, groupDevices,
+  });
+
+  await layer.sendMessage(G, { conversation: "grupo lid" });
+
+  const gm = gdSent.find((x) => x.tag === "message" && x.attrs.to === G);
+  ok("grupo lid: addressing_mode=lid na <message>", gm?.attrs.addressing_mode === "lid");
+  const to = getBinaryNodeChildren(getBinaryNodeChild(gm, "participants"), "to")[0];
+  ok("grupo lid: <to> endereça o jid @lid do device", to?.attrs.jid === LID);
+  ok("grupo lid: enc pkmsg (cold-send por @lid)", getBinaryNodeChild(to, "enc")?.attrs.type === "pkmsg");
+
+  const rec = new SenderKeyRecord();
+  const pw = unpad(
+    await decryptPreKeyWhisperMessage(memDeps, coldAddr(gdAuth), getBinaryNodeChild(to, "enc")!.content as Uint8Array),
+  );
+  const skdm = decodeE2EMessage(pw).senderKeyDistributionMessage;
+  processSenderKeyDistribution(rec, skdm!.axolotlSenderKeyDistributionMessage!);
+  const sk = getBinaryNodeChildren(gm, "enc").find((e) => e.attrs.type === "skmsg");
+  const clear = decodeE2EMessage(unpad(groupDecrypt(C, rec, sk!.content as Uint8Array)));
+  ok("grupo lid: membro lid decifra o texto", clear.conversation === "grupo lid", JSON.stringify(clear));
+}
+
 // --- canal (@newsletter): <plaintext> sem Signal → messages.upsert ---------
 {
   const CHAN = "120363000000000001@newsletter";

@@ -513,19 +513,46 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
 
     const meta = await groups.groupMetadata(groupJid);
     const meUser = jidDecode(auth.creds.me?.id)?.user;
+    const meLidUser = jidDecode(auth.creds.me?.lid)?.user;
+    const isSelf = (user?: string): boolean =>
+      !!user && (user === meUser || (!!meLidUser && user === meLidUser));
 
-    // A metadata pareia lid↔número no `<participant>` — registra o par (o
-    // fan-out do SKDM continua no endereçamento do grupo, isto é só captura).
+    // A metadata pareia lid↔número no `<participant>` — registra o par no mapa.
     for (const p of meta.participants) {
       if (p.phoneNumber) void lidStore.remember(p.phoneNumber, p.jid);
       if (p.lid) void lidStore.remember(p.jid, p.lid);
     }
 
-    const users = meta.participants
-      .map((p) => p.jid)
-      .filter((j) => jidDecode(j)?.user && jidDecode(j)?.user !== meUser);
+    // USYNC é protocolo de NÚMERO. Num grupo lid-addressed o `participant.jid`
+    // vem como `@lid` e o número real fica em `phone_number`; consultar USYNC
+    // com o `@lid` volta vazio → `SKDM p/ 0 device(s)`. Consulta pelo número e
+    // re-endereça os device ids de volta pro jid que o grupo usa (lid ou número).
+    const entries: Array<{ addrUser: string; addrServer: string; queryJid: string }> = [];
+    for (const p of meta.participants) {
+      const addr = jidDecode(p.jid);
+      if (!addr?.user || isSelf(addr.user)) continue;
+      const phone = addr.server === "lid" ? p.phoneNumber : p.jid;
+      const pd = jidDecode(phone);
+      if (!pd?.user || isSelf(pd.user)) continue; // lid sem número conhecido → fica de fora
+      entries.push({
+        addrUser: addr.user,
+        addrServer: addr.server,
+        queryJid: `${pd.user}@${pd.server === "c.us" ? "s.whatsapp.net" : pd.server}`,
+      });
+    }
 
-    const targets = users.length ? expandDeviceJids(await usync.getDeviceList(users)) : [];
+    const targets: string[] = [];
+    if (entries.length) {
+      const deviceMap = await usync.getDeviceList([...new Set(entries.map((e) => e.queryJid))]);
+      for (const e of entries) {
+        const ids = deviceMap[e.queryJid] ?? [];
+        for (const id of ids.length ? ids : [0]) {
+          const jid = id === 0 ? `${e.addrUser}@${e.addrServer}` : `${e.addrUser}:${id}@${e.addrServer}`;
+          if (!targets.includes(jid)) targets.push(jid);
+        }
+      }
+    }
+
     groupDeviceCache.set(groupJid, { devices: targets, at: Date.now() });
     return targets;
   };
@@ -805,7 +832,15 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     expectRestart = false;
     state = "open";
 
-    void stanza; // <success> traz lid/props que só interessam com a libsignal (#5)
+    // O <success> traz o nosso próprio `@lid`. Guarda em `creds.me.lid` (e no
+    // mapa) — precisamos dele pra nos filtrar do fan-out de SKDM em grupos
+    // lid-addressed, onde o nosso `participant` vem como `@lid`, não número.
+    const myLid = stanza.attrs.lid;
+    if (myLid && auth.creds.me && auth.creds.me.lid !== myLid) {
+      auth.creds.me.lid = myLid;
+      void lidStore.remember(auth.creds.me.id, myLid);
+      events.emit("creds.update", { me: auth.creds.me });
+    }
     Promise.resolve(opts.saveCreds?.()).catch(() => {});
 
     // <iq xmlns="passive"><active/></iq> — marca a sessão como ativa

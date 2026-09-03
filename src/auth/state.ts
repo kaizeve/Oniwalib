@@ -12,6 +12,9 @@ import type { KeyPair } from "../crypto/types";
 export interface Contact {
   id: string;
   name?: string;
+  /** `@lid` (id oculto) da própria conta — vem no `<success>`. Usado pra nos
+   *  filtrar do fan-out de SKDM em grupos lid-addressed. */
+  lid?: string;
 }
 
 /** Identidade Signal de um par (a conta principal, no pareamento). `identifierKey`
