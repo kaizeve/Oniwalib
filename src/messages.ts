@@ -1108,7 +1108,29 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
         type: mediatype ? "media" : "text",
       };
       if (mediatype) attrs.mediatype = mediatype;
-      sendNode(node("message", attrs, content));
+      const stanza = node("message", attrs, content);
+      if (process.env.ONI_DEBUG_STATUS) {
+        const dump = (n: BinaryNode): unknown => ({
+          tag: n.tag,
+          attrs: n.attrs,
+          content:
+            typeof n.content === "string"
+              ? n.content
+              : n.content instanceof Uint8Array
+                ? `<${n.content.length}B: ${Buffer.from(n.content.subarray(0, 24)).toString("hex")}…>`
+                : Array.isArray(n.content)
+                  ? n.content.map(dump)
+                  : undefined,
+        });
+        // eslint-disable-next-line no-console
+        console.log(
+          "sendStatus: plaintext =",
+          Buffer.from(encodeE2EMessage(msg)).toString("hex"),
+          "\nsendStatus: stanza =",
+          JSON.stringify(dump(stanza), null, 2),
+        );
+      }
+      sendNode(stanza);
       return { id, sentTo: toNodes.length };
     });
   }
