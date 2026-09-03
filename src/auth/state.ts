@@ -39,6 +39,9 @@ export interface AuthCreds {
   pairingCode?: string;
   nextPreKeyId: number;
   firstUnuploadedPreKeyId: number;
+  /** base64 do keyId da nossa chave-mestra de app-state sync (a mais recente
+   *  compartilhada pelo device primário). Sem isto não dá pra enviar patch. */
+  myAppStateKeyId?: string;
 }
 
 export type SignalDataType =

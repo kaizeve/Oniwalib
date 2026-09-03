@@ -42,6 +42,12 @@ export interface OniwalibEvents {
   "presence.update": { id: string; presences: Record<string, PresenceData> };
   /** Mudou foto de perfil, recado (bio/about) ou nome de um contato. */
   "contacts.update": ContactUpdate[];
+  /** Contato novo/rebatizado — vindo do app-state sync (`contactAction`). */
+  "contacts.upsert": Array<{ id: string; name?: string; notify?: string }>;
+  /** Um chat mudou por app-state sync: `mute`, `pin`, `archive`, `unreadCount`… */
+  "chats.update": Array<{ id: string } & Record<string, unknown>>;
+  /** Chats removidos (app-state `deleteChatAction`). */
+  "chats.delete": string[];
   /** Metadata de um grupo mudou (assunto, descrição, `announce`/`restrict`…). */
   "groups.update": Array<{ id: string } & Record<string, unknown>>;
   /** Entrou/saiu/virou admin alguém num grupo. */

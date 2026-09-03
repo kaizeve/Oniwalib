@@ -298,10 +298,21 @@ bot.register("stories", "alias de !storys", storysCmd);
 bot.register("nome", "troca o nome do perfil do bot (!nome <texto>)", async (args) => {
   const name = args.trim();
   if (!name) return "uso: !nome <texto>";
-  // O push name do WhatsApp MD é uma mutação de app-state (LT-hash), que a
-  // oniwalib ainda não tem. Foto (!foto) e recado (!bio) são <iq> simples e
-  // funcionam; o nome fica pra quando o app-state sync entrar.
-  return "trocar o nome do perfil ainda não dá (precisa de app-state sync). use !bio e !foto por enquanto.";
+  if (!conn.appStateReady()) {
+    return "ainda não recebi as chaves de app-state do celular. abre o WhatsApp no telefone uma vez e tenta de novo.";
+  }
+  try {
+    await conn.updateProfileName(name);
+    return `nome do perfil trocado pra "${name}".`;
+  } catch (e) {
+    return `não rolou: ${(e as Error).message}`;
+  }
+});
+
+bot.register("sync", "força um resync de app-state (push name, mute/pin, contatos)", async () => {
+  if (!conn.appStateReady()) return "sem chaves de app-state ainda (abre o zap no celular).";
+  await conn.resyncAppState();
+  return "resync disparado — olha os logs.";
 });
 
 // --- gestão de grupo (só funciona rodado DENTRO de um grupo) ---------------

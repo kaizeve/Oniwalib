@@ -25,6 +25,8 @@ import {
   type DownloadedMedia,
 } from "./media";
 import { createProfileLayer, type ProfileLayer } from "./profile";
+import { createAppStateLayer, type AppStateLayer } from "./appstate/layer";
+import type { ChatModification, WAPatchName } from "./appstate";
 import {
   createPrivacyLayer,
   type PrivacyLayer,
@@ -247,6 +249,19 @@ export interface OniConnection {
    *  (quando a tua privacidade de "confirmações de leitura" está desligada).
    *  `participant` só em grupo (quem mandou a mensagem). */
   sendReceipt(jid: string, ids: string[], type?: "read" | "read-self", participant?: string): void;
+  /** App-state sync (LT-hash): puxa do servidor o estado das coleções
+   *  (`critical_block` = push name, `regular*` = mute/pin/archive/contatos) e
+   *  emite `creds.update` / `chats.update` / `contacts.upsert`. Roda sozinho no
+   *  connect e a cada `<notification type="server_sync">`; chame para forçar.
+   *  Precisa que o device primário já tenha compartilhado as chaves de sync. */
+  resyncAppState(names?: WAPatchName[]): Promise<void>;
+  /** Troca o nome de perfil (push name) — uma mutação de app-state na coleção
+   *  `critical_block`. Precisa das chaves de sync. */
+  updateProfileName(name: string): Promise<void>;
+  /** Muta/fixa/arquiva um chat, ou marca (não) lido — via app-state sync. */
+  chatModify(mod: ChatModification, jid: string): Promise<void>;
+  /** `true` se já recebemos as chaves-mestras de app-state do device primário. */
+  appStateReady(): boolean;
   /** Fecha e não reconecta. */
   end(err?: Error): void;
   readonly state: "connecting" | "open" | "close";
@@ -462,6 +477,19 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     fetch: opts.fetch ?? (globalThis as { fetch?: FetchLike }).fetch,
   });
 
+  // App-state sync (LT-hash): push name, mute/pin/archive, roster de contatos.
+  // O blob externo de snapshot/patch usa o mesmo esquema de download da mídia.
+  const appstate: AppStateLayer = createAppStateLayer({
+    query,
+    keys: auth.keys,
+    crypto: c,
+    events,
+    creds: auth.creds,
+    saveCreds: opts.saveCreds,
+    downloadBlob: (ref) => media.downloadEncryptedBlob(ref, "WhatsApp App State Keys"),
+  });
+  let appStateSynced = false;
+
   // Perfil: foto e recado (bio). `<iq w:profile:picture>` / `<iq status>`.
   const profile: ProfileLayer = createProfileLayer({ query });
 
@@ -527,6 +555,22 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
       }
     });
   }
+
+  // O device primário entrega as chaves-mestras do app-state sync embrulhadas
+  // num `protocolMessage.appStateSyncKeyShare`. Assim que chegam, guarda e faz
+  // o primeiro resync (push name, contatos, mute/pin…).
+  events.on("messages.upsert", ({ messages: msgs }) => {
+    for (const m of msgs) {
+      const share = (m.message as { protocolMessage?: { appStateSyncKeyShare?: Array<{ keyId: Uint8Array; keyData: Uint8Array; timestamp?: number }> } } | undefined)
+        ?.protocolMessage?.appStateSyncKeyShare;
+      if (share && share.length) {
+        void appstate
+          .ingestKeys(share)
+          .then(() => appstate.resync())
+          .catch((e) => console.error("appstate: ingest/resync falhou:", (e as Error).message));
+      }
+    }
+  });
 
   // --- handlers de stanza --------------------------------------------
 
@@ -650,6 +694,14 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     // nunca bloqueia nem derruba a conexão.
     void enforceRequiredChannels();
 
+    // App-state: se já temos as chaves de sync, puxa o estado (push name,
+    // contatos, mute/pin). Se ainda não, o `messages.upsert` dispara quando
+    // elas chegarem. Uma vez por processo.
+    if (!appStateSynced && appstate.hasKeys()) {
+      appStateSynced = true;
+      void appstate.resync().catch(() => {});
+    }
+
     events.emit("connection.update", { connection: "open" });
   };
 
@@ -724,6 +776,12 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
       case "notification":
         if (n.attrs.type === "encrypt") {
           void messages.onEncryptNotification().catch(() => {});
+        } else if (n.attrs.type === "server_sync") {
+          // o servidor avisa que uma coleção de app-state avançou → resync
+          const cols = getBinaryNodeChildren(n, "collection")
+            .map((c2) => c2.attrs.name)
+            .filter((x): x is WAPatchName => !!x);
+          void appstate.resync(cols.length ? cols : undefined).catch(() => {});
         } else if (n.attrs.type === "w:gp2") {
           try {
             handleGroupNotification(n, {
@@ -844,6 +902,10 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     sendSticker: async (jid, data, o2) =>
       messages.sendMessage(jid, await media.buildStickerMessage(data, o2)),
     downloadMedia: (msg) => media.downloadMedia(msg),
+    resyncAppState: (names) => appstate.resync(names),
+    updateProfileName: (name) => appstate.updateProfileName(name),
+    chatModify: (mod, jid) => appstate.chatModify(mod, jid),
+    appStateReady: () => appstate.hasKeys(),
     postStatus: async (recipients, content) => {
       let msg: E2EMessage;
       if ("text" in content) {

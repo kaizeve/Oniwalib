@@ -78,6 +78,10 @@ export interface E2EProtocolMessage {
   key?: E2EMessageKey;
   /** ProtocolMessage.Type — 0 REVOKE (apagar p/ todos), 3 EPHEMERAL_SETTING, … */
   type?: number;
+  /** ProtocolMessage.appStateSyncKeyShare (campo 7) — o device primário nos
+   *  entrega as chaves-mestras do app-state sync por aqui. Cada entrada:
+   *  `keyId` (id da chave) + `keyData` (32 bytes de material). */
+  appStateSyncKeyShare?: Array<{ keyId: Uint8Array; keyData: Uint8Array; timestamp?: number }>;
 }
 
 /**
@@ -795,6 +799,27 @@ export function decodeE2EMessage(bytes: Uint8Array): E2EMessage {
       key: decodeMessageKey(asBytes(sf.get(1)?.[0])),
       type: typeof ty === "number" ? ty : 0,
     };
+    // appStateSyncKeyShare (campo 7): { repeated AppStateSyncKey keys = 1 }
+    const share = asBytes(sf.get(7)?.[0]);
+    if (share) {
+      const keys: Array<{ keyId: Uint8Array; keyData: Uint8Array; timestamp?: number }> = [];
+      for (const raw of new Reader(share).fields().get(1) ?? []) {
+        const kf = new Reader(raw as Uint8Array).fields();
+        const idBytes = asBytes(kf.get(1)?.[0]); // AppStateSyncKeyId { bytes keyId = 1 }
+        const dataBytes = asBytes(kf.get(2)?.[0]); // AppStateSyncKeyData { bytes keyData = 1; ... timestamp = 3 }
+        const keyId = idBytes ? asBytes(new Reader(idBytes).fields().get(1)?.[0]) : undefined;
+        let keyData: Uint8Array | undefined;
+        let timestamp: number | undefined;
+        if (dataBytes) {
+          const df = new Reader(dataBytes).fields();
+          keyData = asBytes(df.get(1)?.[0]);
+          const t = df.get(3)?.[0];
+          if (typeof t === "number") timestamp = t;
+        }
+        if (keyId && keyData) keys.push({ keyId, keyData, timestamp });
+      }
+      if (keys.length) out.protocolMessage.appStateSyncKeyShare = keys;
+    }
   }
 
   return out;

@@ -35,7 +35,7 @@ import {
   encodeSyncdPatch as protoEncodePatch,
   decodeAppStateSyncKeyShare,
 } from "../src/appstate/proto";
-import { node } from "../src/frame/node";
+import { node, getBinaryNodeChild } from "../src/frame/node";
 import { utf8Encode, utf8Decode } from "../src/frame/buffer";
 import { b64 } from "../src/auth/state";
 import { Writer } from "../src/proto/wire";
@@ -288,6 +288,94 @@ const eqBytes = (a: Uint8Array, b: Uint8Array) =>
     threwOrEmpty = true;
   }
   ok("snapshot vazio decodifica com validateMacs=false", threwOrEmpty);
+}
+
+// --- createAppStateLayer: wiring de cliente ----------------------
+{
+  const { createAppStateLayer } = await import("../src/appstate/layer");
+  const { Emitter } = await import("../src/events/emitter");
+
+  // store em memória
+  const store: Record<string, Record<string, unknown>> = {};
+  const keys = {
+    async get(type: string, ids: string[]) {
+      const b = store[type] ?? {};
+      const out: Record<string, unknown> = {};
+      for (const id of ids) if (id in b) out[id] = b[id];
+      return out;
+    },
+    async set(data: Record<string, Record<string, unknown>>) {
+      for (const t of Object.keys(data)) store[t] = { ...(store[t] ?? {}), ...data[t] };
+    },
+  };
+  const creds: any = { me: { id: "1@s.whatsapp.net", name: "Antigo" } };
+  const ev = new Emitter();
+  const sent: BinaryNode[] = [];
+  const credUpdates: any[] = [];
+  ev.on("creds.update", (u) => credUpdates.push(u));
+
+  const layer = createAppStateLayer({
+    query: async (n: BinaryNode) => {
+      sent.push(n);
+      return node("iq", { type: "result" }, [node("sync", {})]);
+    },
+    keys: keys as any,
+    crypto: c,
+    events: ev as any,
+    creds,
+    downloadBlob: async () => new Uint8Array(0),
+  });
+
+  ok("hasKeys() false no início", layer.hasKeys() === false);
+
+  let threw = false;
+  try {
+    await layer.updateProfileName("Novo");
+  } catch {
+    threw = true;
+  }
+  ok("updateProfileName sem chaves → lança", threw);
+
+  // injeta a chave-mestra
+  const masterKeyId = c.randomBytes(6);
+  const masterKeyData = c.randomBytes(32);
+  await layer.ingestKeys([{ keyId: masterKeyId, keyData: masterKeyData, timestamp: 1 }]);
+  ok("ingestKeys → hasKeys() true", layer.hasKeys() === true);
+  ok("ingestKeys → creds.myAppStateKeyId setado", creds.myAppStateKeyId === b64(masterKeyId));
+  ok("ingestKeys → creds.update emitido", credUpdates.some((u) => u.myAppStateKeyId === b64(masterKeyId)));
+  ok("chave guardada no store", !!(store["app-state-sync-key"] as any)?.[b64(masterKeyId)]);
+
+  // updateProfileName agora funciona: monta o <iq w:sync:app:state>
+  sent.length = 0;
+  credUpdates.length = 0;
+  await layer.updateProfileName("Bot Renomeado");
+  const iq = sent[0]!;
+  ok("push: iq set xmlns w:sync:app:state", iq.attrs.type === "set" && iq.attrs.xmlns === "w:sync:app:state");
+  const col = getBinaryNodeChild(getBinaryNodeChild(iq, "sync"), "collection")!;
+  ok("push: collection critical_block", col.attrs.name === "critical_block");
+  ok("push: version = 0 (antes do patch)", col.attrs.version === "0");
+  const patchNode = getBinaryNodeChild(col, "patch")!;
+  ok("push: <patch> com bytes", patchNode.content instanceof Uint8Array && (patchNode.content as Uint8Array).length > 0);
+  ok("push: reflete o nome localmente (creds.update me.name)", credUpdates.some((u) => u.me?.name === "Bot Renomeado"));
+  ok("push: creds.me.name atualizado", creds.me.name === "Bot Renomeado");
+  ok("push: LTHashState salvo com version 1", (store["app-state-sync-version"] as any)?.critical_block?.version === 1);
+
+  // segundo push encadeia: version enviada = 1
+  sent.length = 0;
+  await layer.updateProfileName("Terceiro");
+  const col2 = getBinaryNodeChild(getBinaryNodeChild(sent[0]!, "sync"), "collection")!;
+  ok("push 2: version enviada = 1", col2.attrs.version === "1");
+  ok("push 2: LTHashState salvo com version 2", (store["app-state-sync-version"] as any)?.critical_block?.version === 2);
+
+  // resync monta o request com todas as coleções e return_snapshot p/ v0
+  sent.length = 0;
+  await layer.resync(["regular_low", "critical_block"]);
+  const rq = sent[0]!;
+  ok("resync: iq set w:sync:app:state", rq.attrs.type === "set" && rq.attrs.xmlns === "w:sync:app:state");
+  const cols = getBinaryNodeChild(rq, "sync")!.content as BinaryNode[];
+  ok("resync: 2 <collection>", cols.length === 2);
+  ok("resync: regular_low v0 return_snapshot=true", cols.find((x) => x.attrs.name === "regular_low")?.attrs.return_snapshot === "true");
+  ok("resync: critical_block v2 return_snapshot=false", cols.find((x) => x.attrs.name === "critical_block")?.attrs.return_snapshot === "false");
 }
 
 const rt =

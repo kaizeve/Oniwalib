@@ -140,6 +140,11 @@ export {
   type SyncActionValue,
   type AppStateSyncKey,
 } from "./appstate";
+export {
+  createAppStateLayer,
+  type AppStateLayer,
+  type AppStateLayerOptions,
+} from "./appstate/layer";
 
 export {
   createChannelsLayer,

@@ -134,6 +134,13 @@ export interface MediaLayer {
    *  anexo de uma mensagem recebida (`imageMessage` / `videoMessage` /
    *  `audioMessage` / `documentMessage` / `stickerMessage`). */
   downloadMedia(msg: E2EMessage): Promise<DownloadedMedia>;
+  /** Baixa + decifra + verifica um blob externo cifrado (mesmo esquema
+   *  `enc‖mac(10)` + HKDF-112 + AES-CBC da mídia, mas com `info` próprio).
+   *  Usado pelo app-state sync (`info = "WhatsApp App State Keys"`). */
+  downloadEncryptedBlob(
+    ref: { directPath?: string; url?: string; mediaKey: Uint8Array; fileEncSha256?: Uint8Array },
+    hkdfInfo: string,
+  ): Promise<Uint8Array>;
 }
 
 const S_WHATSAPP_NET = "@s.whatsapp.net";
@@ -354,6 +361,44 @@ export function createMediaLayer(o: MediaLayerOptions): MediaLayer {
     return { data, type, mimetype: m.mimetype };
   }
 
+  async function downloadEncryptedBlob(
+    ref: { directPath?: string; url?: string; mediaKey: Uint8Array; fileEncSha256?: Uint8Array },
+    hkdfInfo: string,
+  ): Promise<Uint8Array> {
+    if (!ref.mediaKey || ref.mediaKey.length !== 32) {
+      throw new Error("media: blob externo sem mediaKey de 32 bytes");
+    }
+    const url =
+      ref.url && /^https?:\/\//i.test(ref.url)
+        ? ref.url
+        : ref.directPath
+          ? `https://mmg.whatsapp.net${ref.directPath}`
+          : undefined;
+    if (!url) throw new Error("media: blob externo sem url nem directPath");
+
+    const fetchImpl = o.fetch;
+    if (!fetchImpl) throw new Error("media: sem `fetch` — passe `fetch` em openWhatsApp");
+    const res = await fetchImpl(url, { headers: { Origin: ORIGIN, Referer: `${ORIGIN}/` } });
+    if (!res.ok) throw new Error(`media: GET ${url} → HTTP ${res.status}`);
+    if (typeof res.arrayBuffer !== "function") {
+      throw new Error("media: a implementação de `fetch` não expõe arrayBuffer()");
+    }
+    const body = new Uint8Array(await res.arrayBuffer());
+    if (body.length <= 10) throw new Error("media: blob externo curto demais");
+
+    const enc = body.subarray(0, body.length - 10);
+    const mac = body.subarray(body.length - 10);
+    const expanded = c.hkdf(ref.mediaKey, 112, { info: utf8Encode(hkdfInfo) });
+    const iv = expanded.subarray(0, 16);
+    const cipherKey = expanded.subarray(16, 48);
+    const macKey = expanded.subarray(48, 80);
+
+    if (!bytesEqual(c.hmacSha256(macKey, concat(iv, enc)).subarray(0, 10), mac)) {
+      throw new Error("media: MAC do blob externo não confere");
+    }
+    return c.aesCbcDecrypt(cipherKey, iv, enc);
+  }
+
   return {
     buildAudioMessage,
     buildImageMessage,
@@ -361,6 +406,7 @@ export function createMediaLayer(o: MediaLayerOptions): MediaLayer {
     buildDocumentMessage,
     buildStickerMessage,
     downloadMedia,
+    downloadEncryptedBlob,
   };
 }
 
