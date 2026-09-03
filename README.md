@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/oni-banner.svg" alt="oniwalib — Oni, the friendly demon mascot, holding a plug" width="100%">
+<img src="assets/oni-banner.png" alt="OniWaLib — Oni riding a raven, over the RTS wordmark" width="100%">
 
 <br>
 
@@ -338,7 +338,7 @@ await sock.connect();
 ```
 oniwalib/
 ├── assets/
-│   └── oni-banner.svg        the mascot
+│   └── oni-banner.png        the mascot
 ├── src/
 │   ├── frame/                WABinary codec
 │   │   ├── constants.ts        tags + token tables (PROVENANCE: to verify)
