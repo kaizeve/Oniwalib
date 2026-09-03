@@ -118,6 +118,9 @@ export interface E2EInteractiveMessage {
     messageParamsJson?: string;
     messageVersion?: number;
   };
+  /** `InteractiveMessage.contextInfo` (campo 15) — o WhatsApp oficial costuma
+   *  exigir pra renderizar botões de cliente não-oficial. */
+  contextInfo?: E2EContextInfo;
 }
 
 /**
@@ -303,6 +306,14 @@ export interface E2EMessage {
     selectedIndex?: number;
   };
   messageContextInfo?: {
+    /** `DeviceListMetadata` (campo 1). Um `{}` vazio já basta — vários tipos
+     *  (interactive/botões, enquete) só renderizam com o campo PRESENTE. */
+    deviceListMetadata?: {
+      senderKeyHash?: Uint8Array;
+      senderTimestamp?: number;
+      recipientKeyHash?: Uint8Array;
+      recipientTimestamp?: number;
+    };
     deviceListMetadataVersion?: number;
     messageSecret?: Uint8Array;
     /** Liga uma mídia ao container de álbum (campo 10). */
@@ -428,6 +439,9 @@ function interactiveWriter(im: E2EInteractiveMessage): Writer {
     if (nf.messageVersion) nfw.uint(3, nf.messageVersion);
     w.message(6, nfw);
   }
+  // presente mesmo vazio quando o chamador passou `contextInfo: {}` — alguns
+  // forks só renderizam os botões com o campo 15 presente.
+  if (im.contextInfo !== undefined) w.message(15, ctxWriter(im.contextInfo) ?? new Writer());
   return w;
 }
 
@@ -460,6 +474,7 @@ function decodeInteractive(bytes: Uint8Array): E2EInteractiveMessage {
       messageVersion: typeof ver === "number" ? ver : undefined,
     };
   }
+  out.contextInfo = decodeCtx(asBytes(f.get(15)?.[0]));
   return out;
 }
 
@@ -678,6 +693,15 @@ export function encodeE2EMessage(m: E2EMessage): Uint8Array {
   }
   if (m.messageContextInfo) {
     const sub = new Writer();
+    const dlm = m.messageContextInfo.deviceListMetadata;
+    if (dlm) {
+      const d = new Writer();
+      d.bytes(1, dlm.senderKeyHash);
+      if (dlm.senderTimestamp) d.uint(2, dlm.senderTimestamp);
+      d.bytes(8, dlm.recipientKeyHash);
+      if (dlm.recipientTimestamp) d.uint(9, dlm.recipientTimestamp);
+      sub.message(1, d); // presente mesmo vazio — o WhatsApp checa a presença
+    }
     if (m.messageContextInfo.deviceListMetadataVersion)
       sub.uint(2, m.messageContextInfo.deviceListMetadataVersion);
     sub.bytes(3, m.messageContextInfo.messageSecret);
@@ -1051,6 +1075,18 @@ export function decodeE2EMessage(bytes: Uint8Array): E2EMessage {
       deviceListMetadataVersion: typeof v === "number" ? v : undefined,
       messageSecret: asBytes(sf.get(3)?.[0]),
     };
+    const dlmB = asBytes(sf.get(1)?.[0]);
+    if (dlmB !== undefined) {
+      const df = new Reader(dlmB).fields();
+      const st = df.get(2)?.[0];
+      const rt = df.get(9)?.[0];
+      out.messageContextInfo.deviceListMetadata = {
+        senderKeyHash: asBytes(df.get(1)?.[0]),
+        senderTimestamp: typeof st === "number" ? st : undefined,
+        recipientKeyHash: asBytes(df.get(8)?.[0]),
+        recipientTimestamp: typeof rt === "number" ? rt : undefined,
+      };
+    }
     const maB = asBytes(sf.get(10)?.[0]);
     if (maB) {
       const mf = new Reader(maB).fields();

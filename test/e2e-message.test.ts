@@ -149,21 +149,25 @@ ok("conversation vira 0a026f69", hex(encodeE2EMessage({ conversation: "oi" })) =
   const msg = {
     viewOnceMessage: {
       message: {
-        messageContextInfo: { deviceListMetadataVersion: 2 },
+        messageContextInfo: { deviceListMetadata: {}, deviceListMetadataVersion: 2 },
         interactiveMessage: {
           body: { text: "toque um botão" },
           footer: { text: "oni" },
+          header: { title: "", subtitle: "", hasMediaAttachment: false },
           nativeFlowMessage: {
             buttons: [
               { name: "quick_reply", buttonParamsJson: '{"display_text":"🏓 ping","id":"!ping"}' },
               { name: "quick_reply", buttonParamsJson: '{"display_text":"📊 status","id":"!status"}' },
             ],
+            messageParamsJson: "",
           },
+          contextInfo: {},
         },
       },
     },
   };
-  const back = decodeE2EMessage(encodeE2EMessage(msg));
+  const bytes = encodeE2EMessage(msg);
+  const back = decodeE2EMessage(bytes);
   const im = back.viewOnceMessage?.message?.interactiveMessage;
   ok("interactiveMessage.body round-trip", im?.body?.text === "toque um botão");
   ok("interactiveMessage.footer round-trip", im?.footer?.text === "oni");
@@ -173,10 +177,21 @@ ok("conversation vira 0a026f69", hex(encodeE2EMessage({ conversation: "oi" })) =
     "nativeFlow botão params",
     im?.nativeFlowMessage?.buttons?.[1]?.buttonParamsJson === '{"display_text":"📊 status","id":"!status"}',
   );
-  ok(
-    "messageContextInfo.deviceListMetadataVersion",
-    back.viewOnceMessage?.message?.messageContextInfo?.deviceListMetadataVersion === 2,
-  );
+  const mci = back.viewOnceMessage?.message?.messageContextInfo;
+  ok("messageContextInfo.deviceListMetadataVersion", mci?.deviceListMetadataVersion === 2);
+  ok("messageContextInfo.deviceListMetadata presente mesmo vazio", mci?.deviceListMetadata !== undefined);
+  // campo 35 sub deve conter o field-1 (deviceListMetadata) — tag 0x0a len 0x00
+  ok("wire: DeviceListMetadata field 1 emitido", indexOfSeq(bytes, [0x0a, 0x00]) !== -1);
+  // interactiveMessage carrega o campo 15 (contextInfo) presente — tag 0x7a len 0x00
+  ok("wire: interactiveMessage.contextInfo (campo 15) emitido", indexOfSeq(bytes, [0x7a, 0x00]) !== -1);
+}
+
+function indexOfSeq(hay: Uint8Array, needle: number[]): number {
+  outer: for (let i = 0; i + needle.length <= hay.length; i++) {
+    for (let j = 0; j < needle.length; j++) if (hay[i + j] !== needle[j]) continue outer;
+    return i;
+  }
+  return -1;
 }
 
 // toque em native flow → interactiveResponseMessage (campo 48) → messageText = id

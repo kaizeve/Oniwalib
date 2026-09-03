@@ -215,16 +215,21 @@ export class OniBot {
     return {
       viewOnceMessage: {
         message: {
-          messageContextInfo: { deviceListMetadataVersion: 2 },
+          // `deviceListMetadata` PRESENTE (mesmo vazio) + version 2 — o cliente
+          // oficial só desenha botões de cliente não-oficial com esse campo.
+          messageContextInfo: { deviceListMetadata: {}, deviceListMetadataVersion: 2 },
           interactiveMessage: {
             body: { text: body },
             footer: { text: "oniwalib" },
+            header: { title: "", subtitle: "", hasMediaAttachment: false },
             nativeFlowMessage: {
               buttons: buttons.map((b) => ({
                 name: b.name,
                 buttonParamsJson: JSON.stringify(b.params),
               })),
+              messageParamsJson: "",
             },
+            contextInfo: {},
           },
         },
       },
