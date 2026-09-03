@@ -184,14 +184,17 @@ const JID = "120363000000000000@newsletter";
 }
 
 // --- ensureFollowing nunca lança --------------------------------------
+// NB: nomes únicos por bloco de propósito — RTS ainda mistura corpos de dois
+// `const <nome> = <expr diferente>` em blocos irmãos (resíduo do rts#2619;
+// aqui aparecia como `ReferenceError: r is not defined`).
 {
-  const ch = createChannelsLayer({
+  const chFail = createChannelsLayer({
     query: async () => {
       throw new Error("boom");
     },
   });
-  const r = await ch.ensureFollowing(`https://whatsapp.com/channel/${CODE}`);
-  ok("ensure: erro → action=failed, sem throw", r.action === "failed" && !!r.error);
+  const rFail = await chFail.ensureFollowing(`https://whatsapp.com/channel/${CODE}`);
+  ok("ensure: erro → action=failed, sem throw", rFail.action === "failed" && !!rFail.error);
 }
 
 // --- ações novas: unfollow / mute / unmute / create / delete / react ---

@@ -138,4 +138,4 @@ export function tallyPoll(
   return tally;
 }
 
-export type { E2EMessageKey };
+export type { E2EMessageKey } from "../proto/e2e-message";
