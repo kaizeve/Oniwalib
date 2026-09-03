@@ -84,6 +84,8 @@ export interface ImageOptions {
   height?: number;
   /** JPEG pequeno de preview (aparece antes do download). */
   jpegThumbnail?: Uint8Array;
+  /** Ver uma vez: some depois de aberta. */
+  viewOnce?: boolean;
 }
 
 export interface VideoOptions {
@@ -96,6 +98,8 @@ export interface VideoOptions {
   width?: number;
   height?: number;
   jpegThumbnail?: Uint8Array;
+  /** Ver uma vez. */
+  viewOnce?: boolean;
 }
 
 export interface DocumentOptions {

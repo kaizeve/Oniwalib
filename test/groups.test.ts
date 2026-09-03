@@ -269,6 +269,34 @@ const groups = createGroupsLayer({ query });
   ok("requestUpdate: resultado por participante", ru[0]?.jid === "5511555555555@s.whatsapp.net" && ru[0]?.status === "200");
 }
 
+// --- comunidade: sub_groups / link / unlink ------------------
+{
+  reply = node("iq", { type: "result" }, [
+    node("sub_groups", {}, [
+      node("group", { jid: "120363000000000010@g.us", subject: "Anúncios" }),
+      node("group", { jid: "120363000000000011@g.us", subject: "Off-topic" }),
+    ]),
+  ]);
+  const subs = await groups.communitySubGroups(GID);
+  ok("subGroups: iq get <sub_groups>", sent?.attrs.type === "get" && getBinaryNodeChild(sent, "sub_groups") !== undefined);
+  ok("subGroups: 2 grupos com jid+subject", subs.length === 2 && subs[0]?.jid === "120363000000000010@g.us" && subs[1]?.subject === "Off-topic");
+
+  reply = node("iq", { type: "result" }, [
+    node("links", {}, [
+      node("link", { link_type: "sub_group" }, [node("group", { jid: "120363000000000020@g.us" })]),
+      node("link", { link_type: "sub_group", error: "403" }, [node("group", { jid: "120363000000000021@g.us" })]),
+    ]),
+  ]);
+  const linked = await groups.communityLinkSubgroups(GID, ["120363000000000020@g.us", "120363000000000021@g.us"]);
+  const linksNode = getBinaryNodeChild(sent, "links")!;
+  ok("link: <links><link link_type=sub_group><group jid>", getBinaryNodeChildren(linksNode, "link").length === 2 && getBinaryNodeChild(getBinaryNodeChildren(linksNode, "link")[0], "group")?.attrs.jid === "120363000000000020@g.us");
+  ok("link: resultado por grupo (200 / 403)", linked[0]?.status === "200" && linked[1]?.status === "403");
+
+  reply = node("iq", { type: "result" });
+  await groups.communityUnlinkSubgroup(GID, "120363000000000020@g.us");
+  ok("unlink: <unlink unlink_type=sub_group><group jid>", getBinaryNodeChild(getBinaryNodeChild(sent, "unlink"), "group")?.attrs.jid === "120363000000000020@g.us");
+}
+
 const rt =
   typeof (globalThis as any).Bun !== "undefined"
     ? "bun"

@@ -268,6 +268,12 @@ export interface OniConnection {
     participants: string[],
     action: "approve" | "reject",
   ): Promise<ParticipantUpdateResult[]>;
+  /** Subgrupos de uma comunidade (`<iq w:g2><sub_groups>`). */
+  communitySubGroups(communityJid: string): Promise<Array<{ jid: string; subject?: string }>>;
+  /** Liga grupos existentes a uma comunidade como subgrupos. */
+  communityLinkSubgroups(communityJid: string, groupJids: string[]): Promise<ParticipantUpdateResult[]>;
+  /** Desliga um subgrupo da comunidade. */
+  communityUnlinkSubgroup(communityJid: string, groupJid: string): Promise<void>;
   /** Pré-abre sessão Signal com TODOS os devices de TODOS os participantes de
    *  um grupo (metadata → USYNC → cold-send). Roda uma vez (ex.: ao entrar no
    *  grupo) para o próximo `sendMessage(grupo, …)` alcançar todo mundo, não só
@@ -1033,8 +1039,14 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     },
     assertSessions: (jids) => messages.assertSessions(jids),
     sendAudio: async (jid, data, o2) => messages.sendMessage(jid, await media.buildAudioMessage(data, o2)),
-    sendImage: async (jid, data, o2) => messages.sendMessage(jid, await media.buildImageMessage(data, o2)),
-    sendVideo: async (jid, data, o2) => messages.sendMessage(jid, await media.buildVideoMessage(data, o2)),
+    sendImage: async (jid, data, o2) => {
+      const m = await media.buildImageMessage(data, o2);
+      return messages.sendMessage(jid, o2?.viewOnce ? { viewOnceMessageV2: { message: m } } : m);
+    },
+    sendVideo: async (jid, data, o2) => {
+      const m = await media.buildVideoMessage(data, o2);
+      return messages.sendMessage(jid, o2?.viewOnce ? { viewOnceMessageV2: { message: m } } : m);
+    },
     sendDocument: async (jid, data, o2) =>
       messages.sendMessage(jid, await media.buildDocumentMessage(data, o2)),
     sendSticker: async (jid, data, o2) =>
@@ -1098,6 +1110,9 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     groupRequestParticipantsList: (jid) => groups.groupRequestParticipantsList(jid),
     groupRequestParticipantsUpdate: (jid, participants, action) =>
       groups.groupRequestParticipantsUpdate(jid, participants, action),
+    communitySubGroups: (jid) => groups.communitySubGroups(jid),
+    communityLinkSubgroups: (jid, groupJids) => groups.communityLinkSubgroups(jid, groupJids),
+    communityUnlinkSubgroup: (jid, groupJid) => groups.communityUnlinkSubgroup(jid, groupJid),
     assertGroupSessions,
     sendReaction: (jid, key, emoji) => messages.sendReaction(jid, key, emoji),
     sendPresenceUpdate: (type, toJid) => presence.sendPresenceUpdate(type, toJid),

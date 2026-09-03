@@ -9,7 +9,7 @@ It talks the socket directly — no browser, no Puppeteer, no headless Chrome.
 
 <br>
 
-[![tests](https://img.shields.io/badge/tests-897%2F897%20passing-2ea44f?style=flat-square)](#tests)
+[![tests](https://img.shields.io/badge/tests-902%2F902%20passing-2ea44f?style=flat-square)](#tests)
 [![runtimes](https://img.shields.io/badge/runs%20on-bun%20%C2%B7%20node%20%C2%B7%20RTS-0b7285?style=flat-square)](#status)
 [![language](https://img.shields.io/badge/TypeScript-3178c6?style=flat-square&logo=typescript&logoColor=white)](#)
 [![status](https://img.shields.io/badge/status-early%20%C2%B7%20foundation-d9822b?style=flat-square)](#status)
@@ -186,14 +186,14 @@ image / video / document / sticker send: per-type HKDF → AES-CBC + 10-byte MAC
 `status` `<iq>`) · `privacy` 11 (`fetchPrivacySettings` / `updatePrivacySetting`
 — the `<iq xmlns="privacy">` `<category>` parse, flat and nested) · `usync` 15
 (`getDeviceList` — the `<iq xmlns="usync">` device-list query + parse, jid
-normalization, dedup) · `groups` 62 (`groupMetadata` — the `<iq xmlns="w:g2">`
+normalization, dedup) · `groups` 67 (`groupMetadata` — the `<iq xmlns="w:g2">`
 `<group>` parse: subject/owner/participants+admin, `announce`/`restrict`,
 community via `<parent>` / `<linked_parent>`) · `reaction` 19
 (reaction / `protocolMessage` codec roundtrip; incoming reaction → `messages.reaction`,
 revoke → `messages.delete`; `sendReaction` encrypted back) · `pairing` 18 (the
 `<pair-success>` crypto both directions) ·
 `client` 18 (QR → pairing → `515` restart → login `<success>`, over the mock
-server) → **897 / 897 on bun**.
+server) → **902 / 902 on bun**.
 
 ### <a name="oni-version"></a>Keeping it working — the oni-version
 

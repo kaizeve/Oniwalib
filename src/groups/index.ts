@@ -131,6 +131,12 @@ export interface GroupsLayer {
     participants: string[],
     action: "approve" | "reject",
   ): Promise<ParticipantUpdateResult[]>;
+  /** Subgrupos de uma comunidade. */
+  communitySubGroups(communityJid: string): Promise<Array<{ jid: string; subject?: string }>>;
+  /** Liga grupos existentes a uma comunidade (como subgrupos). */
+  communityLinkSubgroups(communityJid: string, groupJids: string[]): Promise<ParticipantUpdateResult[]>;
+  /** Desliga um subgrupo da comunidade. */
+  communityUnlinkSubgroup(communityJid: string, groupJid: string): Promise<void>;
 }
 
 function textOf(n: BinaryNode | undefined): string | undefined {
@@ -450,7 +456,49 @@ export function createGroupsLayer(o: GroupsLayerOptions): GroupsLayer {
     }));
   }
 
+  async function communitySubGroups(
+    communityJid: string,
+  ): Promise<Array<{ jid: string; subject?: string }>> {
+    const res = await groupQuery(communityJid, "get", [node("sub_groups", {})]);
+    const wrap = getBinaryNodeChild(res, "sub_groups") ?? res;
+    return getBinaryNodeChildren(wrap, "group")
+      .map((g) => ({ jid: g.attrs.jid!, subject: g.attrs.subject }))
+      .filter((g) => g.jid);
+  }
+
+  async function communityLinkSubgroups(
+    communityJid: string,
+    groupJids: string[],
+  ): Promise<ParticipantUpdateResult[]> {
+    const res = await groupQuery(communityJid, "set", [
+      node(
+        "links",
+        {},
+        groupJids.map((jid) =>
+          node("link", { link_type: "sub_group" }, [node("group", { jid })]),
+        ),
+      ),
+    ]);
+    const wrap = getBinaryNodeChild(res, "links") ?? res;
+    return getBinaryNodeChildren(wrap, "link").map((l) => {
+      const g = getBinaryNodeChild(l, "group");
+      return { jid: g?.attrs.jid ?? "", status: l.attrs.error ?? "200", content: l };
+    });
+  }
+
+  async function communityUnlinkSubgroup(
+    communityJid: string,
+    groupJid: string,
+  ): Promise<void> {
+    await groupQuery(communityJid, "set", [
+      node("unlink", { unlink_type: "sub_group" }, [node("group", { jid: groupJid })]),
+    ]);
+  }
+
   return {
+    communitySubGroups,
+    communityLinkSubgroups,
+    communityUnlinkSubgroup,
     groupMetadata,
     groupParticipants,
     groupCreate,
