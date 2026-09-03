@@ -726,6 +726,13 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     extra?: { id?: string; editAttr?: boolean; opts?: SendOptions },
   ): Promise<{ id: string }> {
     if (extra?.opts) applyOpts(msg, extra.opts);
+    if (process.env.ONI_DEBUG_MSG) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `sendMessage(${jid}) keys=[${Object.keys(msg).join(",")}] plaintext=` +
+          Buffer.from(encodeE2EMessage(msg)).toString("hex"),
+      );
+    }
     if (isJidNewsletter(jid)) return sendNewsletterMessage(jid, msg, extra);
     if (isJidGroup(jid)) return sendGroupMessage(jid, msg, extra);
 
