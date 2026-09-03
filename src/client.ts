@@ -103,6 +103,10 @@ export interface OpenOptions {
    *  que vira `messages.upsert`. Default `false` — a Baileys também não manda
    *  sozinha; use `conn.readMessages(...)` quando quiser marcar como lido. */
   sendReadReceipts?: boolean;
+  /** Decodifica o CORPO das mensagens no history sync (mais caro; o
+   *  `WebMessageInfo` é grande). Default `true`. `false` = só a lista de chats
+   *  e a contagem. */
+  historyMessages?: boolean;
   /** ms entre pings de keepalive. Default 25000. */
   keepAliveMs?: number;
   /** Máx. de reconexões automáticas seguidas antes de desistir. Default 5. */
@@ -647,22 +651,27 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
       "WhatsApp History Keys",
     );
     const raw = c.inflate(compressed);
-    const hist = decodeHistorySync(raw);
+    const hist = decodeHistorySync(raw, { withMessages: opts.historyMessages ?? true });
     for (const map of hist.lidMappings) void lidStore.remember(map.pn, map.lid);
     const contacts = hist.pushnames
       .filter((p) => p.id)
       .map((p) => ({ id: p.id, notify: p.pushname }));
     if (contacts.length) events.emit("contacts.upsert", contacts);
+    // achata as mensagens de todas as conversas do chunk, ordenadas por tempo
+    const messages = hist.chats
+      .flatMap((ch) => ch.messages ?? [])
+      .sort((a, b) => (a.messageTimestamp ?? 0) - (b.messageTimestamp ?? 0));
     events.emit("messaging-history.set", {
       chats: hist.chats,
       contacts,
+      messages,
       syncType: hist.syncTypeName,
       progress: hist.progress,
       isLatest: (hist.progress ?? 0) >= 100,
     });
     console.log(
       `history: ${hist.syncTypeName ?? "?"} — ${hist.chats.length} chat(s), ` +
-        `${hist.pushnames.length} nome(s)` +
+        `${messages.length} msg(s), ${hist.pushnames.length} nome(s)` +
         (hist.progress !== undefined ? `, ${hist.progress}%` : ""),
     );
   };

@@ -30,11 +30,13 @@ const G = "120363000@g.us";
       { id: G, name: "Grupo", messageCount: 0, archived: true },
     ] as any,
     contacts: [{ id: A, notify: "Fulano F" }],
+    messages: [{ key: { remoteJid: A, fromMe: false, id: "H1" }, message: { conversation: "oi do historico" }, messageTimestamp: 1699999000 }],
   });
   ok("history: 2 chats", store.chats.size === 2);
   ok("history: chat A com unread e pinned", store.chats.get(A)?.unreadCount === 2 && store.chats.get(A)?.pinned === 1699999999);
   ok("history: chat G arquivado", store.chats.get(G)?.archived === true);
   ok("history: contato A", store.contacts.get(A)?.notify === "Fulano F");
+  ok("history: mensagem do histórico gravada", (store.loadMessage(A, "H1")?.message as any)?.conversation === "oi do historico");
 
   // messages.upsert grava a mensagem e bumpa o chat
   ev.emit("messages.upsert", {
@@ -44,9 +46,9 @@ const G = "120363000@g.us";
       { key: { remoteJid: A, fromMe: false, id: "M2" }, message: { conversation: "tudo bem?" }, messageTimestamp: 1700000200 },
     ],
   });
-  ok("upsert: 2 mensagens no chat A", store.messages.get(A)?.size === 2);
+  ok("upsert: 3 mensagens no chat A (H1 + M1 + M2)", store.messages.get(A)?.size === 3);
   ok("upsert: loadMessage", store.loadMessage(A, "M1")?.message !== undefined);
-  ok("upsert: recentMessages ordena", store.recentMessages(A).map((m) => m.key.id).join(",") === "M1,M2");
+  ok("upsert: recentMessages ordena", store.recentMessages(A).map((m) => m.key.id).join(",") === "H1,M1,M2");
   ok("upsert: conversationTimestamp atualizado", store.chats.get(A)?.conversationTimestamp === 1700000200);
 
   // messages.update troca o conteúdo (edição)
@@ -57,7 +59,7 @@ const G = "120363000@g.us";
 
   // messages.delete remove
   ev.emit("messages.delete", { keys: [{ remoteJid: A, fromMe: false, id: "M2" }] });
-  ok("delete: sobrou 1", store.messages.get(A)?.size === 1);
+  ok("delete: sobrou 2 (H1 + M1)", store.messages.get(A)?.size === 2);
 
   // chats.update / contacts.update
   ev.emit("chats.update", [{ id: A, unreadCount: 0 }]);
@@ -84,7 +86,7 @@ const G = "120363000@g.us";
 
   // serialização
   const snap = store.toJSON();
-  ok("toJSON: chats+contacts+messages", snap.chats.length === 2 && snap.contacts.length >= 1 && snap.messages.length === 1);
+  ok("toJSON: chats+contacts+messages", snap.chats.length === 2 && snap.contacts.length >= 1 && snap.messages.length === 1 && snap.messages[0].items.length === 2);
 
   const store2 = makeInMemoryStore();
   store2.fromJSON(snap);

@@ -4,6 +4,7 @@
 import { decodeHistorySync, HISTORY_SYNC_TYPE } from "../src/history";
 import { nodeAdapter as c } from "../src/crypto/node-adapter";
 import { Writer } from "../src/proto/wire";
+import { encodeE2EMessage } from "../src/proto/e2e-message";
 
 let pass = 0;
 let fail = 0;
@@ -84,6 +85,41 @@ function lidMap(pn: string, lid: string): Uint8Array {
 
   ok("1 lidMapping", h.lidMappings.length === 1);
   ok("lidMapping pn+lid", h.lidMappings[0]?.pn === "5511999@s.whatsapp.net" && h.lidMappings[0]?.lid === "123@lid");
+}
+
+// --- withMessages: decodifica o corpo (WebMessageInfo) ---------
+{
+  // MessageKey { remoteJid=1, fromMe=2, id=3 }
+  const mkKey = (id: string, fromMe: boolean) =>
+    new Writer().string(1, "111@g.us").boolF(2, fromMe).string(3, id).finish();
+  // WebMessageInfo { key=1, message=2, messageTimestamp=3, status=4, pushName=19, starred=17 }
+  const wmi = (id: string, text: string, ts: number, fromMe = false) =>
+    new Writer()
+      .bytes(1, mkKey(id, fromMe))
+      .bytes(2, encodeE2EMessage({ conversation: text }))
+      .uint(3, ts)
+      .uint(4, 3)
+      .string(19, "Alguém")
+      .finish();
+  // HistorySyncMsg { message=1 (WebMessageInfo) }
+  const hsm = (b: Uint8Array) => new Writer().bytes(1, b).finish();
+
+  const conv = new Writer()
+    .string(1, "111@g.us")
+    .bytes(2, hsm(wmi("W1", "primeira", 1700000001)))
+    .bytes(2, hsm(wmi("W2", "segunda", 1700000002, true)))
+    .finish();
+  const buf = new Writer().uint(1, 2).bytes(2, conv).finish();
+
+  const lite = decodeHistorySync(buf);
+  ok("sem withMessages: messages undefined", lite.chats[0]?.messages === undefined && lite.chats[0]?.messageCount === 2);
+
+  const full = decodeHistorySync(buf, { withMessages: true });
+  const msgs = full.chats[0]?.messages ?? [];
+  ok("withMessages: 2 mensagens", msgs.length === 2);
+  ok("withMessages: key.id + fromMe", msgs[0]?.key?.id === "W1" && msgs[0]?.key?.fromMe === false && msgs[1]?.key?.fromMe === true);
+  ok("withMessages: conteúdo decodificado", (msgs[0]?.message as any)?.conversation === "primeira");
+  ok("withMessages: timestamp + status + pushName", msgs[0]?.messageTimestamp === 1700000001 && msgs[0]?.status === 3 && msgs[0]?.pushName === "Alguém");
 }
 
 // vazio / desconhecido

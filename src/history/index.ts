@@ -12,6 +12,7 @@
 // `Pushname` / `PhoneNumberToLIDMapping`), estáveis.
 
 import { Reader } from "../proto/wire";
+import { decodeE2EMessage, type E2EMessage, type E2EMessageKey } from "../proto/e2e-message";
 
 function s(v: number | Uint8Array | undefined): string | undefined {
   return v instanceof Uint8Array ? utf8(v) : undefined;
@@ -56,12 +57,25 @@ export const HISTORY_SYNC_TYPE: Record<number, string> = {
   6: "ON_DEMAND",
 };
 
+export interface HistoryMessage {
+  key?: E2EMessageKey;
+  message?: E2EMessage;
+  messageTimestamp?: number;
+  /** WebMessageInfo.Status: 1 PENDING, 2 SERVER_ACK, 3 DELIVERY_ACK, 4 READ, 5 PLAYED. */
+  status?: number;
+  pushName?: string;
+  starred?: boolean;
+  labels?: string[];
+}
+
 export interface HistoryChat {
   id: string;
   name?: string;
   displayName?: string;
-  /** número de mensagens que vieram nesta conversa (não decodificadas). */
+  /** número de mensagens que vieram nesta conversa. */
   messageCount: number;
+  /** as mensagens em si, só se `decodeHistorySync(buf, { withMessages: true })`. */
+  messages?: HistoryMessage[];
   unreadCount?: number;
   readOnly?: boolean;
   archived?: boolean;
@@ -87,11 +101,49 @@ export interface HistorySyncResult {
   lidMappings: Array<{ pn: string; lid: string }>;
 }
 
-function decodeConversation(buf: Uint8Array): HistoryChat {
+function decodeMessageKey(buf: Uint8Array | undefined): E2EMessageKey | undefined {
+  if (!buf) return undefined;
   const f = new Reader(buf).fields();
   return {
+    remoteJid: s(f.get(1)?.[0]),
+    fromMe: typeof f.get(2)?.[0] === "number" ? f.get(2)![0] !== 0 : undefined,
+    id: s(f.get(3)?.[0]),
+    participant: s(f.get(4)?.[0]),
+  };
+}
+
+// HistorySyncMsg { message = 1 (WebMessageInfo), msgOrderId = 2 }
+// WebMessageInfo { key=1, message=2, messageTimestamp=3, status=4, pushName=19,
+//   starred=17, labels=28 }
+function decodeHistoryMessage(histSyncMsgBuf: Uint8Array): HistoryMessage {
+  const wmiBuf = new Reader(histSyncMsgBuf).fields().get(1)?.[0];
+  if (!(wmiBuf instanceof Uint8Array)) return {};
+  const f = new Reader(wmiBuf).fields();
+  const msgBytes = f.get(2)?.[0];
+  return {
+    key: decodeMessageKey(f.get(1)?.[0] instanceof Uint8Array ? (f.get(1)![0] as Uint8Array) : undefined),
+    message: msgBytes instanceof Uint8Array ? decodeE2EMessage(msgBytes) : undefined,
+    messageTimestamp: n(f.get(3)?.[0]),
+    status: n(f.get(4)?.[0]),
+    pushName: s(f.get(19)?.[0]),
+    starred: bool(f.get(17)?.[0]),
+    labels: (f.get(28) ?? [])
+      .filter((x) => x instanceof Uint8Array)
+      .map((x) => utf8(x as Uint8Array)),
+  };
+}
+
+function decodeConversation(buf: Uint8Array, withMessages: boolean): HistoryChat {
+  const f = new Reader(buf).fields();
+  const rawMsgs = f.get(2) ?? [];
+  return {
     id: s(f.get(1)?.[0]) ?? "",
-    messageCount: (f.get(2) ?? []).length,
+    messageCount: rawMsgs.length,
+    messages: withMessages
+      ? rawMsgs
+          .filter((m) => m instanceof Uint8Array)
+          .map((m) => decodeHistoryMessage(m as Uint8Array))
+      : undefined,
     lastMessageTimestamp: n(f.get(5)?.[0]),
     unreadCount: n(f.get(6)?.[0]),
     readOnly: bool(f.get(7)?.[0]),
@@ -109,8 +161,14 @@ function decodeConversation(buf: Uint8Array): HistoryChat {
   };
 }
 
-/** Decodifica um blob `HistorySync` JÁ descomprimido (zlib-inflate feito antes). */
-export function decodeHistorySync(buf: Uint8Array): HistorySyncResult {
+/** Decodifica um blob `HistorySync` JÁ descomprimido (zlib-inflate feito antes).
+ *  `withMessages` decodifica também o corpo das mensagens de cada conversa
+ *  (mais caro — o `WebMessageInfo` é grande); default só a contagem. */
+export function decodeHistorySync(
+  buf: Uint8Array,
+  opts?: { withMessages?: boolean },
+): HistorySyncResult {
+  const withMessages = !!opts?.withMessages;
   const f = new Reader(buf).fields();
   const syncType = n(f.get(1)?.[0]);
   return {
@@ -118,7 +176,7 @@ export function decodeHistorySync(buf: Uint8Array): HistorySyncResult {
     syncTypeName: syncType !== undefined ? HISTORY_SYNC_TYPE[syncType] : undefined,
     chunkOrder: n(f.get(5)?.[0]),
     progress: n(f.get(6)?.[0]),
-    chats: (f.get(2) ?? []).map((c) => decodeConversation(c as Uint8Array)),
+    chats: (f.get(2) ?? []).map((c) => decodeConversation(c as Uint8Array, withMessages)),
     pushnames: (f.get(7) ?? []).map((p) => {
       const pf = new Reader(p as Uint8Array).fields();
       return { id: s(pf.get(1)?.[0]) ?? "", pushname: s(pf.get(2)?.[0]) };

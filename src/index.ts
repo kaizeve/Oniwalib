@@ -166,6 +166,7 @@ export {
   HISTORY_SYNC_TYPE,
   type HistorySyncResult,
   type HistoryChat,
+  type HistoryMessage,
 } from "./history";
 export {
   makeInMemoryStore,

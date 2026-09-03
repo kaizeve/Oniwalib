@@ -113,9 +113,19 @@ export function makeInMemoryStore(): InMemoryStore {
     const offs: Array<() => void> = [];
 
     offs.push(
-      events.on("messaging-history.set", ({ chats: hc, contacts: hcont }) => {
+      events.on("messaging-history.set", ({ chats: hc, contacts: hcont, messages: hmsgs }) => {
         for (const ch of hc) upsertChat(fromHistoryChat(ch));
         for (const ct of hcont) upsertContact({ id: ct.id, notify: ct.notify });
+        for (const m of hmsgs ?? []) {
+          const jid = m.key?.remoteJid;
+          if (!jid || !m.key?.id) continue;
+          chatBucket(jid).set(m.key.id, {
+            key: m.key as MessageKey,
+            message: m.message,
+            messageTimestamp: m.messageTimestamp,
+            pushName: m.pushName,
+          });
+        }
       }),
     );
     offs.push(

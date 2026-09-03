@@ -85,6 +85,9 @@ export interface OniwalibEvents {
   "messaging-history.set": {
     chats: import("../history").HistoryChat[];
     contacts: Array<{ id: string; notify?: string }>;
+    /** Mensagens do histórico (achatadas de todas as conversas do chunk),
+     *  ordenadas por tempo crescente. Vazio se o blob não trouxe corpo. */
+    messages: import("../history").HistoryMessage[];
     syncType?: string;
     progress?: number;
     /** `true` no último chunk (progress 100). */
