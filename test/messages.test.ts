@@ -596,6 +596,56 @@ function bundleIq(remote: ReturnType<typeof memoryAuthState>, jid: string, otkPu
   ok("status: lista vazia lança", threw.includes("destinatários"), threw);
 }
 
+// --- status com statusDevices: fana o SKDM p/ CADA device do destinatário ---
+{
+  const sdAuth = memoryAuthState();
+  sdAuth.creds.me = { id: "5511555550000@s.whatsapp.net" };
+  const sdSent: BinaryNode[] = [];
+
+  const DEV = "5511999999999:12@s.whatsapp.net"; // device não-primário, sem sessão
+  const devAuth = memoryAuthState();
+  const devDeps: SignalDeps = { c: C, curve: makeCurve(C), storage: makeSignalStorage(devAuth) };
+  const devOtk = C.generateX25519();
+  await devAuth.keys.set({ "pre-key": { "9191": { public: devOtk.publicKey, private: devOtk.privateKey } } });
+
+  const query = async (n: BinaryNode) => bundleIq(devAuth, DEV, devOtk.publicKey, n.attrs.id ?? "1");
+  let askedWith: string[] = [];
+  const statusDevices = async (jids: string[]) => { askedWith = jids; return [DEV]; };
+
+  const sdLayer = createMessagesLayer({
+    events: new Emitter(), auth: sdAuth, crypto: C,
+    sendNode: (x) => sdSent.push(x),
+    genId: (() => { let i = 0; return () => `sd-${i++}`; })(),
+    query, statusDevices,
+  });
+
+  const NUM = "5511999999999@s.whatsapp.net";
+  await sdLayer.sendStatus({ imageMessage: { caption: "foto", mediaKey: new Uint8Array(32) } }, [NUM]);
+
+  ok("status+statusDevices: resolver recebeu a lista de números", askedWith.length === 1 && askedWith[0] === NUM);
+  const sm = sdSent.find((x) => x.tag === "message" && x.attrs.to === "status@broadcast");
+  const sto = getBinaryNodeChildren(getBinaryNodeChild(sm, "participants"), "to")[0];
+  ok("status+statusDevices: <to> endereça o device resolvido, não o bare jid", sto?.attrs.jid === DEV);
+  ok("status+statusDevices: enc pkmsg (sessão recém-aberta via cold-send)",
+    getBinaryNodeChild(sto, "enc")?.attrs.type === "pkmsg");
+  ok("status+statusDevices: <enc type=skmsg> no corpo",
+    getBinaryNodeChildren(sm, "enc").some((e) => e.attrs.type === "skmsg"));
+  ok("status+statusDevices: sem addressing_mode (status é sempre pn)", sm?.attrs.addressing_mode === undefined);
+  ok("status+statusDevices: imageMessage → type=media mediatype=image",
+    sm?.attrs.type === "media" && sm?.attrs.mediatype === "image");
+
+  // o device decifra: SKDM (pkmsg) + skmsg
+  const rec = new SenderKeyRecord();
+  const pw = unpad(await decryptPreKeyWhisperMessage(
+    devDeps, coldAddr(sdAuth), getBinaryNodeChild(sto, "enc")!.content as Uint8Array));
+  const skdm = decodeE2EMessage(pw).senderKeyDistributionMessage;
+  processSenderKeyDistribution(rec, skdm!.axolotlSenderKeyDistributionMessage!);
+  const sk = getBinaryNodeChildren(sm, "enc").find((e) => e.attrs.type === "skmsg");
+  const clear = decodeE2EMessage(unpad(groupDecrypt(C, rec, sk!.content as Uint8Array)));
+  ok("status+statusDevices: device decifra o conteúdo do status",
+    clear.imageMessage?.caption === "foto", JSON.stringify(clear));
+}
+
 // --- onEncryptNotification NÃO faz loop de upload de pré-chave -------------
 {
   const pkAuth = memoryAuthState();

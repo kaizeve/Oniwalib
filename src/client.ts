@@ -525,17 +525,40 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
       .map((p) => p.jid)
       .filter((j) => jidDecode(j)?.user && jidDecode(j)?.user !== meUser);
 
-    const devices = users.length ? await usync.getDeviceList(users) : {};
-    const targets: string[] = [];
+    const targets = users.length ? expandDeviceJids(await usync.getDeviceList(users)) : [];
+    groupDeviceCache.set(groupJid, { devices: targets, at: Date.now() });
+    return targets;
+  };
+
+  // { user@server: [deviceIds] }  →  ["user@server", "user:12@server", …]
+  function expandDeviceJids(devices: Record<string, number[]>): string[] {
+    const out: string[] = [];
     for (const [user, ids] of Object.entries(devices)) {
       const d = jidDecode(user);
       if (!d?.user) continue;
       for (const id of ids.length ? ids : [0]) {
-        targets.push(id === 0 ? user : `${d.user}:${id}@${d.server}`);
+        out.push(id === 0 ? user : `${d.user}:${id}@${d.server}`);
       }
     }
-    groupDeviceCache.set(groupJid, { devices: targets, at: Date.now() });
-    return targets;
+    return out;
+  }
+
+  // Devices de uma lista solta de números (destinatários de status). Mesma
+  // resolução USYNC do grupo, sem a metadata. Exclui as nossas próprias contas.
+  const resolveStatusDeviceJids = async (userJids: string[]): Promise<string[]> => {
+    const meUser = jidDecode(auth.creds.me?.id)?.user;
+    const users = Array.from(
+      new Set(
+        userJids
+          .map((j) => {
+            const d = jidDecode(j);
+            return d?.user ? `${d.user}@${d.server || "s.whatsapp.net"}` : undefined;
+          })
+          .filter((j): j is string => !!j && jidDecode(j)?.user !== meUser),
+      ),
+    );
+    if (!users.length) return [];
+    return expandDeviceJids(await usync.getDeviceList(users));
   };
 
   // Camada de mensagem (Signal): decifra <message>, cifra sendText, sobe
@@ -548,6 +571,7 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     genId,
     query,
     groupDevices: resolveGroupDeviceJids,
+    statusDevices: resolveStatusDeviceJids,
     lid: lidStore,
     saveCreds: opts.saveCreds,
   });

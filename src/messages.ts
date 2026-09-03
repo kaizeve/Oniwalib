@@ -75,6 +75,11 @@ export interface MessagesLayerOptions {
    *  USYNC, cacheado). Se fornecido, `sendGroupMessage` fana o SKDM pra todos,
    *  não só pros que já têm sessão. */
   groupDevices?: (groupJid: string) => Promise<string[]>;
+  /** Resolve todos os device-jids de uma lista de números (USYNC). Se
+   *  fornecido, `sendStatus` fana o SKDM pra CADA device de cada destinatário
+   *  — como a Baileys — em vez de só o device primário. Sem isto o cliente
+   *  recebe o `skmsg` sem a sender key e mostra "sua versão não é compatível". */
+  statusDevices?: (jids: string[]) => Promise<string[]>;
   /** Mapa número↔lid. Se fornecido, `sendStatus` resolve destinatários `@lid`
    *  para o número (que é o que o `statusJidList` espera) e as stanzas de
    *  entrada alimentam o mapa. */
@@ -150,7 +155,8 @@ const PREKEY_LOW_WATERMARK = 10;
 const PREKEY_UPLOAD_MIN_INTERVAL_MS = 10 * 60 * 1000;
 
 export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
-  const { events, auth, crypto: c, sendNode, genId, query, groupDevices, lid } = opts;
+  const { events, auth, crypto: c, sendNode, genId, query, groupDevices, statusDevices, lid } =
+    opts;
   const deps: SignalDeps = {
     c,
     curve: makeCurve(c),
@@ -1000,9 +1006,25 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     }
     if (targets.length === 0) throw new Error("sendStatus: lista de destinatários vazia");
 
+    // A Baileys manda o SKDM do status pra CADA device de cada destinatário
+    // (USYNC), não só o primário — senão o cliente recebe o `skmsg` sem a
+    // sender key e renderiza "sua versão não é compatível".
+    let deviceJids = targets;
+    if (statusDevices) {
+      try {
+        const resolved = await statusDevices(targets);
+        if (resolved.length) deviceJids = resolved;
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error(
+          `sendStatus: não resolvi os devices, uso só o primário: ${(e as Error).message}`,
+        );
+      }
+    }
+
     if (query) {
       try {
-        await assertSessions(targets);
+        await assertSessions(deviceJids);
       } catch {
         /* segue com quem já tem sessão */
       }
@@ -1026,15 +1048,13 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
 
       const toNodes: BinaryNode[] = [];
       let anyPkmsg = false;
-      let addressingMode: string | undefined;
-      for (const jid of targets) {
+      for (const jid of deviceJids) {
         let addr: string;
         try {
           addr = signalAddress(jid);
         } catch {
           continue;
         }
-        if (isLidUser(jid)) addressingMode = "lid";
         try {
           // eslint-disable-next-line no-await-in-loop
           const { type, body } = await signalEncrypt(deps, addr, skdmPlain);
@@ -1045,7 +1065,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
           );
           if (type === 3) anyPkmsg = true;
         } catch {
-          /* sem sessão com esse destinatário */
+          /* sem sessão com esse device */
         }
       }
       if (toNodes.length === 0) {
@@ -1067,8 +1087,15 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
       }
 
       const id = genId();
-      const attrs: Record<string, string> = { id, to: STATUS, type: "text" };
-      if (addressingMode) attrs.addressing_mode = addressingMode;
+      // status@broadcast é sempre pn-endereçado (statusJidList é número) — a
+      // Baileys não põe addressing_mode aqui. `type` segue o conteúdo.
+      const mediatype = msg.imageMessage ? "image" : msg.videoMessage ? "video" : undefined;
+      const attrs: Record<string, string> = {
+        id,
+        to: STATUS,
+        type: mediatype ? "media" : "text",
+      };
+      if (mediatype) attrs.mediatype = mediatype;
       sendNode(node("message", attrs, content));
       return { id, sentTo: toNodes.length };
     });
