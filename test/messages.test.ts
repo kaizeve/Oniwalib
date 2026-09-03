@@ -689,6 +689,17 @@ function bundleIq(remote: ReturnType<typeof memoryAuthState>, jid: string, otkPu
   const clear = decodeE2EMessage(unpad(groupDecrypt(C, rec, sk!.content as Uint8Array)));
   ok("status+statusDevices: device decifra o conteúdo do status",
     clear.imageMessage?.caption === "foto", JSON.stringify(clear));
+
+  // status de TEXTO: `conversation` tem que virar `extendedTextMessage` (senão o
+  // WhatsApp mostra "sua versão não é compatível"). Mesma cadeia de sender key.
+  sdSent.length = 0;
+  await sdLayer.sendStatus({ conversation: "oi texto" }, [NUM]);
+  const sm2 = sdSent.find((x) => x.tag === "message" && x.attrs.to === "status@broadcast");
+  ok("status texto: type=text sem mediatype", sm2?.attrs.type === "text" && sm2?.attrs.mediatype === undefined);
+  const sk2 = getBinaryNodeChildren(sm2, "enc").find((e) => e.attrs.type === "skmsg");
+  const clear2 = decodeE2EMessage(unpad(groupDecrypt(C, rec, sk2!.content as Uint8Array)));
+  ok("status texto: conversation → extendedTextMessage",
+    clear2.extendedTextMessage?.text === "oi texto" && !clear2.conversation, JSON.stringify(clear2));
 }
 
 // --- onEncryptNotification NÃO faz loop de upload de pré-chave -------------

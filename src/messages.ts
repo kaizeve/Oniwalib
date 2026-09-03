@@ -979,6 +979,13 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     const meId = auth.creds.me?.id;
     if (!meId) throw new Error("sendStatus: sem creds.me");
 
+    // WhatsApp só renderiza status de texto como `extendedTextMessage` — um
+    // `conversation` cru cai em "sua versão não é compatível". A Baileys também
+    // converte todo `{ text }` em `extendedTextMessage`.
+    if (msg.conversation && !msg.extendedTextMessage) {
+      msg = { extendedTextMessage: { text: msg.conversation } };
+    }
+
     // O `statusJidList` do WhatsApp é lista de NÚMERO. Um destinatário `@lid` só
     // serve se a gente já pareou o número dele (stanza de grupo / metadata) —
     // senão o cold-send não abre sessão e o status sai pra ninguém.
