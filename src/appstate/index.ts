@@ -476,7 +476,12 @@ export type ChatModification =
   | { mute: number | null }
   | { pin: boolean }
   | { archive: boolean }
-  | { markRead: boolean };
+  | { markRead: boolean }
+  | { addChatLabel: { labelId: string } }
+  | { removeChatLabel: { labelId: string } };
+
+/** LabelAssociationType.Chat na Baileys (`Types/LabelAssociation`). */
+const LABEL_JID = "label_jid";
 
 export function chatModificationToAppPatch(
   mod: ChatModification,
@@ -518,6 +523,17 @@ export function chatModificationToAppPatch(
       syncAction: { timestamp: now, archiveChatAction: { archived: !!mod.archive } },
       index: ["archive", jid],
       type: "regular_low",
+      apiVersion: 3,
+      operation: SET,
+    };
+  }
+  if ("addChatLabel" in mod || "removeChatLabel" in mod) {
+    const labeled = "addChatLabel" in mod;
+    const labelId = labeled ? mod.addChatLabel.labelId : mod.removeChatLabel.labelId;
+    return {
+      syncAction: { timestamp: now, labelAssociationAction: { labeled } },
+      index: [LABEL_JID, labelId, jid],
+      type: "regular",
       apiVersion: 3,
       operation: SET,
     };

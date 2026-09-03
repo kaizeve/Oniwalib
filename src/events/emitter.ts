@@ -54,6 +54,17 @@ export interface OniwalibEvents {
   "chats.update": Array<{ id: string } & Record<string, unknown>>;
   /** Chats removidos (app-state `deleteChatAction`). */
   "chats.delete": string[];
+  /** Uma etiqueta (label) foi criada/renomeada/apagada (app-state
+   *  `labelEditAction`). `id` é o labelId. */
+  "labels.edit": { id: string; name?: string; color?: number; deleted?: boolean; predefinedId?: number };
+  /** Uma etiqueta foi (des)associada a um chat/mensagem (app-state
+   *  `labelAssociationAction`). */
+  "labels.association": {
+    type: "add" | "remove";
+    labelId: string;
+    chatId?: string;
+    messageId?: string;
+  };
   /** Metadata de um grupo mudou (assunto, descrição, `announce`/`restrict`…). */
   "groups.update": Array<{ id: string } & Record<string, unknown>>;
   /** Entrou/saiu/virou admin alguém num grupo. */

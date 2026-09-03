@@ -304,6 +304,10 @@ export interface OniConnection {
   updateProfileName(name: string): Promise<void>;
   /** Muta/fixa/arquiva um chat, ou marca (não) lido — via app-state sync. */
   chatModify(mod: ChatModification, jid: string): Promise<void>;
+  /** (Des)associa uma etiqueta a um chat (app-state; emite `labels.association`
+   *  no eco). `labelId` é o id da etiqueta (1..20 nos padrões). */
+  addChatLabel(jid: string, labelId: string): Promise<void>;
+  removeChatLabel(jid: string, labelId: string): Promise<void>;
   /** `true` se já recebemos as chaves-mestras de app-state do device primário. */
   appStateReady(): boolean;
   /** Lista de jids bloqueados (também emite `blocklist.update`). */
@@ -1039,6 +1043,8 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     resyncAppState: (names) => appstate.resync(names),
     updateProfileName: (name) => appstate.updateProfileName(name),
     chatModify: (mod, jid) => appstate.chatModify(mod, jid),
+    addChatLabel: (jid, labelId) => appstate.chatModify({ addChatLabel: { labelId } }, jid),
+    removeChatLabel: (jid, labelId) => appstate.chatModify({ removeChatLabel: { labelId } }, jid),
     appStateReady: () => appstate.hasKeys(),
     fetchBlocklist: () => blocklist.fetchBlocklist(),
     updateBlockStatus: (jid, action) => blocklist.updateBlockStatus(jid, action),

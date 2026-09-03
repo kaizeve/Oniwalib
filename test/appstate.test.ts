@@ -196,6 +196,25 @@ const eqBytes = (a: Uint8Array, b: Uint8Array) =>
   }
   ok("snapshotMac adulterado é rejeitado", threw);
 
+  // --- mute / archive / markRead / label: field numbers do WAProto ---
+  {
+    const kinds: Array<[any, string, (v: any) => boolean]> = [
+      [{ mute: 8 * 3600 * 1000 }, "mute", (v) => v.muteAction?.muted === true],
+      [{ archive: true }, "archive", (v) => v.archiveChatAction?.archived === true],
+      [{ markRead: true }, "markChatAsRead", (v) => v.markChatAsReadAction?.read === true],
+      [{ addChatLabel: { labelId: "3" } }, "label_jid", (v) => v.labelAssociationAction?.labeled === true],
+    ];
+    for (const [mod, idx0, check] of kinds) {
+      const cr = chatModificationToAppPatch(mod, "5511@s.whatsapp.net");
+      const s0b = newLTHashState();
+      const enc2 = await encodeSyncdPatch(deps, lt, cr, myKeyIdB64, s0b);
+      const seen2: ChatMutation[] = [];
+      await decodeSyncdPatch(deps, lt, protoDecodePatch(enc2.patch), cr.type, s0b, (mm) => seen2.push(mm), true);
+      ok(`${idx0}: index[0]`, seen2[0]?.index[0] === idx0);
+      ok(`${idx0}: value roundtrip com MAC ok`, check(seen2[0]?.syncAction.value));
+    }
+  }
+
   // segundo patch encadeia a versão e o hash
   const { state: state2 } = await encodeSyncdPatch(
     deps,

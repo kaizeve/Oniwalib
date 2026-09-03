@@ -53,6 +53,10 @@ export interface InMemoryStore {
   messages: Map<string, Map<string, StoreMessage>>;
   presences: Map<string, Record<string, PresenceData>>;
   groupMetadata: Map<string, GroupMetadata>;
+  /** labelId → {name, color, deleted}. */
+  labels: Map<string, { name?: string; color?: number; deleted?: boolean }>;
+  /** jid do chat → conjunto de labelIds. */
+  chatLabels: Map<string, Set<string>>;
 
   /** Assina os eventos de uma conexão. Devolve uma função pra desassinar. */
   bind(events: Emitter): () => void;
@@ -94,6 +98,8 @@ export function makeInMemoryStore(): InMemoryStore {
   const messages = new Map<string, Map<string, StoreMessage>>();
   const presences = new Map<string, Record<string, PresenceData>>();
   const groupMetadata = new Map<string, GroupMetadata>();
+  const labels = new Map<string, { name?: string; color?: number; deleted?: boolean }>();
+  const chatLabels = new Map<string, Set<string>>();
 
   const chatBucket = (jid: string): Map<string, StoreMessage> => {
     let b = messages.get(jid);
@@ -216,6 +222,21 @@ export function makeInMemoryStore(): InMemoryStore {
         groupMetadata.delete(id);
       }),
     );
+    offs.push(
+      events.on("labels.edit", (l) => {
+        if (l.deleted) labels.delete(l.id);
+        else labels.set(l.id, { name: l.name, color: l.color, deleted: false });
+      }),
+    );
+    offs.push(
+      events.on("labels.association", (a) => {
+        if (!a.chatId) return;
+        let set = chatLabels.get(a.chatId);
+        if (!set) chatLabels.set(a.chatId, (set = new Set()));
+        if (a.type === "add") set.add(a.labelId);
+        else set.delete(a.labelId);
+      }),
+    );
 
     return () => {
       for (const off of offs) off();
@@ -267,6 +288,8 @@ export function makeInMemoryStore(): InMemoryStore {
     messages,
     presences,
     groupMetadata,
+    labels,
+    chatLabels,
     bind,
     loadMessage,
     recentMessages,

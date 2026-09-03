@@ -168,6 +168,8 @@ export interface SyncActionValue {
   markChatAsReadAction?: { read?: boolean };
   deleteChatAction?: Record<string, never>;
   deleteMessageForMeAction?: { deleteMedia?: boolean; messageTimestamp?: number };
+  labelEditAction?: { name?: string; color?: number; predefinedId?: number; deleted?: boolean };
+  labelAssociationAction?: { labeled?: boolean };
 }
 export interface SyncActionData {
   index?: Uint8Array;
@@ -216,10 +218,27 @@ export function decodeSyncActionValue(buf: Uint8Array): SyncActionValue {
   const pushName = b(f.get(7)?.[0]);
   if (pushName) out.pushNameSetting = { name: s(new Reader(pushName).fields().get(1)?.[0]) };
 
-  const archive = b(f.get(14)?.[0]);
+  // números de campo conferidos contra o WAProto (SyncActionValue):
+  // labelEdit=14, labelAssociation=15, archive=17, deleteMessageForMe=18,
+  // markChatAsRead=20, deleteChat=22.
+  const labelEdit = b(f.get(14)?.[0]);
+  if (labelEdit) {
+    const lf = new Reader(labelEdit).fields();
+    out.labelEditAction = {
+      name: s(lf.get(1)?.[0]),
+      color: n(lf.get(2)?.[0]),
+      predefinedId: n(lf.get(3)?.[0]),
+      deleted: typeof lf.get(4)?.[0] === "number" ? lf.get(4)![0] !== 0 : undefined,
+    };
+  }
+
+  const labelAssoc = b(f.get(15)?.[0]);
+  if (labelAssoc) out.labelAssociationAction = { labeled: decodeBoolMsg(labelAssoc, 1) };
+
+  const archive = b(f.get(17)?.[0]);
   if (archive) out.archiveChatAction = { archived: decodeBoolMsg(archive, 1) };
 
-  const delForMe = b(f.get(15)?.[0]);
+  const delForMe = b(f.get(18)?.[0]);
   if (delForMe) {
     const df = new Reader(delForMe).fields();
     out.deleteMessageForMeAction = {
@@ -228,10 +247,10 @@ export function decodeSyncActionValue(buf: Uint8Array): SyncActionValue {
     };
   }
 
-  const markRead = b(f.get(17)?.[0]);
+  const markRead = b(f.get(20)?.[0]);
   if (markRead) out.markChatAsReadAction = { read: decodeBoolMsg(markRead, 1) };
 
-  if (b(f.get(19)?.[0])) out.deleteChatAction = {};
+  if (b(f.get(22)?.[0])) out.deleteChatAction = {};
 
   return out;
 }
@@ -256,6 +275,8 @@ export interface SyncActionValueInput {
   pinAction?: { pinned: boolean };
   archiveChatAction?: { archived: boolean };
   markChatAsReadAction?: { read: boolean };
+  labelAssociationAction?: { labeled: boolean };
+  labelEditAction?: { name?: string; color?: number; predefinedId?: number; deleted?: boolean };
 }
 
 export function encodeSyncActionValue(v: SyncActionValueInput): Uint8Array {
@@ -270,8 +291,17 @@ export function encodeSyncActionValue(v: SyncActionValueInput): Uint8Array {
     w.message(4, m);
   }
   if (v.pinAction) w.message(5, new Writer().boolF(1, v.pinAction.pinned));
-  if (v.archiveChatAction) w.message(14, new Writer().boolF(1, v.archiveChatAction.archived));
-  if (v.markChatAsReadAction) w.message(17, new Writer().boolF(1, v.markChatAsReadAction.read));
+  if (v.labelEditAction) {
+    const le = new Writer().string(1, v.labelEditAction.name);
+    if (v.labelEditAction.color !== undefined) le.uint(2, v.labelEditAction.color);
+    if (v.labelEditAction.predefinedId !== undefined) le.uint(3, v.labelEditAction.predefinedId);
+    if (v.labelEditAction.deleted) le.boolF(4, true);
+    w.message(14, le);
+  }
+  if (v.labelAssociationAction) w.message(15, new Writer().boolF(1, v.labelAssociationAction.labeled));
+  // SyncActionValue: archive=17, markChatAsRead=20 (conferido contra o WAProto).
+  if (v.archiveChatAction) w.message(17, new Writer().boolF(1, v.archiveChatAction.archived));
+  if (v.markChatAsReadAction) w.message(20, new Writer().boolF(1, v.markChatAsReadAction.read));
   return w.finish();
 }
 

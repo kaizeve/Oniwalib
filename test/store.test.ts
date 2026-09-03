@@ -84,6 +84,17 @@ const G = "120363000@g.us";
   await store.fetchGroupMetadata(G, fetcher);
   ok("groupMetadata: refetch após participante mudar", fetches === 2);
 
+  // labels
+  ev.emit("labels.edit", { id: "1", name: "Cliente", color: 2 });
+  ev.emit("labels.edit", { id: "2", name: "Spam" });
+  ev.emit("labels.association", { type: "add", labelId: "1", chatId: A });
+  ev.emit("labels.association", { type: "add", labelId: "2", chatId: A });
+  ev.emit("labels.association", { type: "remove", labelId: "2", chatId: A });
+  ok("labels.edit: guardou 2", store.labels.size === 2 && store.labels.get("1")?.name === "Cliente");
+  ok("labels.association: chat A tem só label 1", [...(store.chatLabels.get(A) ?? [])].join(",") === "1");
+  ev.emit("labels.edit", { id: "2", deleted: true });
+  ok("labels.edit deleted: sobrou 1", store.labels.size === 1);
+
   // serialização
   const snap = store.toJSON();
   ok("toJSON: chats+contacts+messages", snap.chats.length === 2 && snap.contacts.length >= 1 && snap.messages.length === 1 && snap.messages[0].items.length === 2);

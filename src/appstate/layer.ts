@@ -177,6 +177,28 @@ export function createAppStateLayer(o: AppStateLayerOptions): AppStateLayer {
       events.emit("messages.delete", {
         keys: [{ remoteJid: id, id: msgId, fromMe: fromMe === "1" }],
       });
+      return;
+    }
+    if (v.labelEditAction) {
+      events.emit("labels.edit", {
+        id: id ?? "",
+        name: v.labelEditAction.name,
+        color: v.labelEditAction.color,
+        deleted: v.labelEditAction.deleted,
+        predefinedId: v.labelEditAction.predefinedId,
+      });
+      return;
+    }
+    if (v.labelAssociationAction) {
+      // index: ["label_jid", labelId, chatJid]  (chat) ou
+      //        ["label_message", labelId, chatJid, msgId, ...]  (mensagem)
+      const [, labelId, chatId, messageId] = m.index;
+      events.emit("labels.association", {
+        type: v.labelAssociationAction.labeled ? "add" : "remove",
+        labelId: labelId ?? "",
+        chatId,
+        messageId,
+      });
     }
   }
 
@@ -290,6 +312,8 @@ export function createAppStateLayer(o: AppStateLayerOptions): AppStateLayer {
       pinAction: s.pinAction,
       archiveChatAction: s.archiveChatAction,
       markChatAsReadAction: s.markChatAsReadAction,
+      labelAssociationAction: s.labelAssociationAction,
+      labelEditAction: s.labelEditAction,
       timestamp: s.timestamp,
     };
   }
