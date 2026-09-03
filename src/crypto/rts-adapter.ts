@@ -48,6 +48,14 @@ export const rtsAdapter: Crypto = {
     return u8(nodeCrypto.createHash("md5").update(data).digest());
   },
 
+  inflate(data) {
+    // O RTS pode não trazer `node:zlib`. Tenta; se não der, o history sync
+    // fica indisponível (nada mais na lib depende disto).
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const zlib = require("node:zlib") as { inflateSync(b: Uint8Array): Uint8Array };
+    return u8(zlib.inflateSync(data));
+  },
+
   hkdf(ikm, length, opts) {
     const salt = opts.salt ?? new Uint8Array(32);
     const info = opts.info ?? new Uint8Array(0);

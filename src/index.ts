@@ -161,6 +161,12 @@ export {
   type PollVoteContext,
 } from "./polls";
 export {
+  decodeHistorySync,
+  HISTORY_SYNC_TYPE,
+  type HistorySyncResult,
+  type HistoryChat,
+} from "./history";
+export {
   createBlocklistLayer,
   parseBlocklist,
   type BlocklistLayer,

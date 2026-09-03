@@ -35,6 +35,11 @@ export interface Crypto {
   /** MD5 — só para o `buildHash` do handshake (não é primitivo de segurança). */
   md5?(data: Uint8Array): Uint8Array;
 
+  /** zlib INFLATE (formato zlib, não gzip). Só o history sync usa — o blob de
+   *  histórico vem comprimido. Opcional: se o adapter não prover, o history
+   *  sync fica indisponível (o resto da lib não depende disto). */
+  inflate?(data: Uint8Array): Uint8Array;
+
   /** HKDF-SHA-256 → `length` bytes. */
   hkdf(ikm: Uint8Array, length: number, opts: { salt?: Uint8Array; info?: Uint8Array }): Uint8Array;
 

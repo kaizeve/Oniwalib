@@ -71,6 +71,12 @@ export const nodeAdapter: Crypto = {
     return u8(nodeCrypto.createHash("md5").update(data).digest());
   },
 
+  inflate(data) {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const zlib = require("node:zlib") as typeof import("node:zlib");
+    return u8(zlib.inflateSync(data));
+  },
+
   hkdf(ikm, length, opts) {
     const salt = opts.salt ?? new Uint8Array(32);
     const info = opts.info ?? new Uint8Array(0);

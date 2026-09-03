@@ -10,6 +10,7 @@
 
 import { Emitter, type MessageKey, type WAPresence, type OniwalibEvents } from "./events/emitter";
 import { decryptPollVote, resolvePollVote } from "./polls";
+import { decodeHistorySync } from "./history";
 import { connectOni } from "./connect";
 import { configureSuccessfulPairing } from "./pairing";
 import { createMessagesLayer, type MessagesLayer } from "./messages";
@@ -607,16 +608,61 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
   // o primeiro resync (push name, contatos, mute/pin…).
   events.on("messages.upsert", ({ messages: msgs }) => {
     for (const m of msgs) {
-      const share = (m.message as { protocolMessage?: { appStateSyncKeyShare?: Array<{ keyId: Uint8Array; keyData: Uint8Array; timestamp?: number }> } } | undefined)
-        ?.protocolMessage?.appStateSyncKeyShare;
+      const pmsg = (m.message as { protocolMessage?: {
+        appStateSyncKeyShare?: Array<{ keyId: Uint8Array; keyData: Uint8Array; timestamp?: number }>;
+        historySyncNotification?: {
+          mediaKey?: Uint8Array; directPath?: string; fileEncSha256?: Uint8Array;
+          syncType?: number; progress?: number;
+        };
+      } } | undefined)?.protocolMessage;
+      const share = pmsg?.appStateSyncKeyShare;
       if (share && share.length) {
         void appstate
           .ingestKeys(share)
           .then(() => appstate.resync())
           .catch((e) => console.error("appstate: ingest/resync falhou:", (e as Error).message));
       }
+      const hsn = pmsg?.historySyncNotification;
+      if (hsn?.mediaKey && hsn.directPath) {
+        void ingestHistorySync(hsn).catch((e) =>
+          console.error("history: sync falhou:", (e as Error).message),
+        );
+      }
     }
   });
+
+  const ingestHistorySync = async (hsn: {
+    mediaKey?: Uint8Array; directPath?: string; fileEncSha256?: Uint8Array;
+    syncType?: number; progress?: number;
+  }): Promise<void> => {
+    if (!c.inflate) {
+      console.error("history: adapter de cripto sem `inflate` (node:zlib) — history sync indisponível");
+      return;
+    }
+    const compressed = await media.downloadEncryptedBlob(
+      { mediaKey: hsn.mediaKey!, directPath: hsn.directPath!, fileEncSha256: hsn.fileEncSha256 },
+      "WhatsApp History Keys",
+    );
+    const raw = c.inflate(compressed);
+    const hist = decodeHistorySync(raw);
+    for (const map of hist.lidMappings) void lidStore.remember(map.pn, map.lid);
+    const contacts = hist.pushnames
+      .filter((p) => p.id)
+      .map((p) => ({ id: p.id, notify: p.pushname }));
+    if (contacts.length) events.emit("contacts.upsert", contacts);
+    events.emit("messaging-history.set", {
+      chats: hist.chats,
+      contacts,
+      syncType: hist.syncTypeName,
+      progress: hist.progress,
+      isLatest: (hist.progress ?? 0) >= 100,
+    });
+    console.log(
+      `history: ${hist.syncTypeName ?? "?"} — ${hist.chats.length} chat(s), ` +
+        `${hist.pushnames.length} nome(s)` +
+        (hist.progress !== undefined ? `, ${hist.progress}%` : ""),
+    );
+  };
 
   // --- handlers de stanza --------------------------------------------
 

@@ -87,6 +87,18 @@ export interface E2EProtocolMessage {
   editedMessage?: E2EMessage;
   /** ProtocolMessage.timestampMs (campo 15) — quando a edição/ação ocorreu. */
   timestampMs?: number;
+  /** ProtocolMessage.historySyncNotification (campo 6) — o device primário
+   *  aponta para o blob (comprimido + cifrado) com o histórico de chats. */
+  historySyncNotification?: {
+    fileSha256?: Uint8Array;
+    fileLength?: number;
+    mediaKey?: Uint8Array;
+    fileEncSha256?: Uint8Array;
+    directPath?: string;
+    syncType?: number;
+    chunkOrder?: number;
+    progress?: number;
+  };
 }
 
 /**
@@ -875,6 +887,21 @@ export function decodeE2EMessage(bytes: Uint8Array): E2EMessage {
     if (edited) out.protocolMessage.editedMessage = decodeE2EMessage(edited);
     const tsMs = sf.get(15)?.[0];
     if (typeof tsMs === "number") out.protocolMessage.timestampMs = tsMs;
+    const hsn = asBytes(sf.get(6)?.[0]);
+    if (hsn) {
+      const hf = new Reader(hsn).fields();
+      const numOf = (x: number | Uint8Array | undefined) => (typeof x === "number" ? x : undefined);
+      out.protocolMessage.historySyncNotification = {
+        fileSha256: asBytes(hf.get(1)?.[0]),
+        fileLength: numOf(hf.get(2)?.[0]),
+        mediaKey: asBytes(hf.get(3)?.[0]),
+        fileEncSha256: asBytes(hf.get(4)?.[0]),
+        directPath: asStr(hf.get(5)?.[0]),
+        syncType: numOf(hf.get(6)?.[0]),
+        chunkOrder: numOf(hf.get(7)?.[0]),
+        progress: numOf(hf.get(9)?.[0]),
+      };
+    }
     // appStateSyncKeyShare (campo 7): { repeated AppStateSyncKey keys = 1 }
     const share = asBytes(sf.get(7)?.[0]);
     if (share) {

@@ -79,6 +79,17 @@ export interface OniwalibEvents {
   /** A blocklist da conta mudou. `action` ausente = lista completa (no fetch
    *  inicial ou num `<notification type="blocklist">` de dump). */
   "blocklist.update": { blocklist: string[]; action?: "add" | "remove" };
+  /** History sync — chega em pedaços após o pareamento. `chats` é a lista de
+   *  conversas (nome/não-lido/fixado/arquivado/mudo); `contacts` os pushnames.
+   *  `syncType`: INITIAL_BOOTSTRAP / RECENT / FULL / PUSH_NAME… */
+  "messaging-history.set": {
+    chats: import("../history").HistoryChat[];
+    contacts: Array<{ id: string; notify?: string }>;
+    syncType?: string;
+    progress?: number;
+    /** `true` no último chunk (progress 100). */
+    isLatest?: boolean;
+  };
   "node.recv": BinaryNode;
   "node.send": BinaryNode;
 }
