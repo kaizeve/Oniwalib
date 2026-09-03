@@ -225,6 +225,13 @@ export interface OniConnection {
   removeProfilePicture(): Promise<void>;
   /** Define o seu recado / bio. */
   setBio(text: string): Promise<void>;
+  /** URL da foto de perfil de `jid` (contato, grupo ou você). `hd` = imagem
+   *  cheia. `undefined` se não tem foto ou a privacidade não deixa. */
+  getProfilePictureUrl(jid: string, hd?: boolean): Promise<string | undefined>;
+  /** Recado / bio de `jid`. `undefined` se não há ou é privado. */
+  fetchStatus(jid: string): Promise<{ status?: string; setAt?: Date } | undefined>;
+  /** Quais dos `numbers` têm conta no WhatsApp (um resultado por entrada). */
+  onWhatsApp(numbers: string[]): Promise<import("./usync").OnWhatsAppResult[]>;
   /** Lê as configurações de privacidade da conta (readreceipts, last, online,
    *  profile, status, groupadd, calladd). */
   fetchPrivacySettings(): Promise<PrivacySettings>;
@@ -1251,6 +1258,9 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     setProfilePicture: (jpeg) => profile.setProfilePicture(jpeg),
     removeProfilePicture: () => profile.removeProfilePicture(),
     setBio: (text) => profile.setBio(text),
+    getProfilePictureUrl: (jid, hd) => profile.getProfilePictureUrl(jid, hd),
+    fetchStatus: (jid) => profile.fetchStatus(jid),
+    onWhatsApp: (numbers) => usync.onWhatsApp(numbers),
     fetchPrivacySettings: () => privacy.fetchPrivacySettings(),
     updatePrivacySetting: (category, value) => privacy.updatePrivacySetting(category, value),
     getDeviceList: (jids) => usync.getDeviceList(jids),

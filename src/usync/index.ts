@@ -34,11 +34,23 @@ export interface USyncLayerOptions {
   crypto: Crypto;
 }
 
+export interface OnWhatsAppResult {
+  /** O que você passou (número em qualquer formato). */
+  input: string;
+  /** `true` = está no WhatsApp. */
+  exists: boolean;
+  /** JID canônico quando `exists` (`55...@s.whatsapp.net`). */
+  jid?: string;
+}
+
 export interface USyncLayer {
   /** Device ids de cada JID de usuário: `{ "55...@s.whatsapp.net": [0, 23] }`.
    *  Um JID que não está no WhatsApp (ou sem `<devices>` na resposta) sai com
    *  `[]`. As chaves são sempre a forma normalizada (sem device/agent). */
   getDeviceList(jids: string[]): Promise<Record<string, number[]>>;
+  /** Diz quais dos `numbers` têm conta no WhatsApp (USYNC `contact`). Aceita
+   *  número com ou sem `+`/`@s.whatsapp.net`. Um por entrada, na mesma ordem. */
+  onWhatsApp(numbers: string[]): Promise<OnWhatsAppResult[]>;
 }
 
 function parseDeviceList(userNode: BinaryNode): number[] {
@@ -89,5 +101,44 @@ export function createUSyncLayer(o: USyncLayerOptions): USyncLayer {
     return result;
   }
 
-  return { getDeviceList };
+  async function onWhatsApp(numbers: string[]): Promise<OnWhatsAppResult[]> {
+    const inputs = Array.from(new Set(numbers.map((n) => n.trim()).filter(Boolean)));
+    if (inputs.length === 0) return [];
+    // o `<contact>` quer o número com `+` na frente e sem sufixo de servidor
+    const asContact = (n: string) => {
+      const digits = n.replace(/@.*/, "").replace(/[^\d]/g, "");
+      return digits ? `+${digits}` : n;
+    };
+
+    const res = await query(
+      node("iq", { to: S_WHATSAPP_NET, type: "get", xmlns: "usync" }, [
+        node(
+          "usync",
+          { sid: sid(), mode: "query", last: "true", index: "0", context: "interactive" },
+          [
+            node("query", {}, [node("contact", {})]),
+            node("list", {}, inputs.map((n) => node("user", {}, [node("contact", {}, asContact(n))]))),
+          ],
+        ),
+      ]),
+    );
+
+    const list = getBinaryNodeChild(getBinaryNodeChild(res, "usync"), "list");
+    const byDigits = new Map<string, OnWhatsAppResult>();
+    for (const userNode of getBinaryNodeChildren(list, "user")) {
+      const contact = getBinaryNodeChild(userNode, "contact");
+      const type = contact?.attrs.type; // "in" = tem conta, "out" = não
+      const jid = userNode.attrs.jid ? jidNormalizedUser(userNode.attrs.jid) : undefined;
+      const exists = type === "in" || (!!jid && type !== "out");
+      const key = (jid ?? "").replace(/[^\d]/g, "");
+      if (key) byDigits.set(key, { input: "", exists, jid: exists ? jid : undefined });
+    }
+    return inputs.map((input) => {
+      const digits = input.replace(/@.*/, "").replace(/[^\d]/g, "");
+      const hit = byDigits.get(digits);
+      return hit ? { ...hit, input } : { input, exists: false };
+    });
+  }
+
+  return { getDeviceList, onWhatsApp };
 }

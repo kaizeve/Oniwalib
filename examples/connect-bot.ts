@@ -323,6 +323,26 @@ bot.register("contato", "manda um cartão de contato: !contato <nome> <telefone>
   return undefined;
 });
 
+bot.register("perfil", "mostra foto + recado de quem chamou (ou de um número: !perfil <num>)", async (args, msg) => {
+  const target = args.trim() ? `${args.trim().replace(/\D/g, "")}@s.whatsapp.net` : msg.from;
+  const [url, st] = await Promise.all([
+    conn.getProfilePictureUrl(target).catch(() => undefined),
+    conn.fetchStatus(target).catch(() => undefined),
+  ]);
+  return [
+    `*perfil de* ${target}`,
+    `foto: ${url ?? "(sem foto / privado)"}`,
+    `recado: ${st?.status ?? "(sem recado / privado)"}`,
+  ].join("\n");
+});
+
+bot.register("zap", "checa se um número tem WhatsApp: !zap <num> [num...]", async (args) => {
+  const nums = args.trim().split(/\s+/).filter(Boolean);
+  if (!nums.length) return "uso: !zap <num> [num...]";
+  const r = await conn.onWhatsApp(nums);
+  return r.map((x) => `${x.input} → ${x.exists ? `✅ ${x.jid}` : "❌ não tem"}`).join("\n");
+});
+
 bot.register("nome", "troca o nome do perfil do bot (!nome <texto>)", async (args) => {
   const name = args.trim();
   if (!name) return "uso: !nome <texto>";

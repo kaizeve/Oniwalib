@@ -92,6 +92,36 @@ ok("jid já normalizado passa igual", jidNormalizedUser(A) === A);
   ok("jids=[] → {}", JSON.stringify(map) === "{}");
 }
 
+// --- onWhatsApp ------------------------------------------------------------
+{
+  reply = node("iq", { type: "result", id: "1" }, [
+    node("usync", {}, [
+      node("list", {}, [
+        node("user", { jid: A }, [node("contact", { type: "in" })]),
+        node("user", {}, [node("contact", { type: "out" })]),
+      ]),
+    ]),
+  ]);
+  sent = undefined;
+  const r = await usync.onWhatsApp(["+55 11 99999-9999", "5511777770000"]);
+  const q = getBinaryNodeChild(getBinaryNodeChild(sent, "usync"), "query");
+  ok("onWhatsApp: <query><contact/>", !!getBinaryNodeChild(q, "contact"));
+  const firstContact = getBinaryNodeChildren(
+    getBinaryNodeChild(getBinaryNodeChild(sent, "usync"), "list"),
+    "user",
+  )[0];
+  ok("onWhatsApp: <contact> com + na frente", getBinaryNodeChild(firstContact, "contact")?.content === "+5511999999999");
+  ok("onWhatsApp: 1 por entrada, na ordem", r.length === 2 && r[0]?.input === "+55 11 99999-9999");
+  ok("onWhatsApp: existe → jid canônico", r[0]?.exists === true && r[0]?.jid === A);
+  ok("onWhatsApp: não existe", r[1]?.exists === false && r[1]?.jid === undefined);
+  reply = node("iq", { type: "result", id: "1" });
+}
+{
+  sent = undefined;
+  const r = await usync.onWhatsApp([]);
+  ok("onWhatsApp: []  não faz query", sent === undefined && r.length === 0);
+}
+
 const rt =
   typeof (globalThis as any).Bun !== "undefined"
     ? "bun"

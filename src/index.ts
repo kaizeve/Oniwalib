@@ -107,6 +107,7 @@ export {
   jidNormalizedUser,
   type USyncLayer,
   type USyncLayerOptions,
+  type OnWhatsAppResult,
 } from "./usync";
 export {
   createGroupsLayer,

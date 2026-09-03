@@ -10,8 +10,8 @@
 //            <status>{texto utf-8}</status>
 //          </iq>
 
-import { node, type BinaryNode } from "../frame/node";
-import { utf8Encode } from "../frame/buffer";
+import { node, getBinaryNodeChild, type BinaryNode } from "../frame/node";
+import { utf8Encode, utf8Decode } from "../frame/buffer";
 
 const S_WHATSAPP_NET = "@s.whatsapp.net";
 
@@ -29,6 +29,12 @@ export interface ProfileLayer {
   removeProfilePicture(): Promise<void>;
   /** Define o recado / bio (o texto "Recado" do perfil). */
   setBio(text: string): Promise<void>;
+  /** URL da foto de perfil de `jid` (contato, grupo ou a própria conta).
+   *  `hd` = imagem cheia em vez do preview. `undefined` se não tem foto ou a
+   *  privacidade não deixa. */
+  getProfilePictureUrl(jid: string, hd?: boolean): Promise<string | undefined>;
+  /** Recado / bio (o "Recado") de `jid`. `undefined` se não há ou é privado. */
+  fetchStatus(jid: string): Promise<{ status?: string; setAt?: Date } | undefined>;
 }
 
 export function createProfileLayer(o: ProfileLayerOptions): ProfileLayer {
@@ -55,5 +61,43 @@ export function createProfileLayer(o: ProfileLayerOptions): ProfileLayer {
     );
   }
 
-  return { setProfilePicture, removeProfilePicture, setBio };
+  async function getProfilePictureUrl(jid: string, hd = false): Promise<string | undefined> {
+    try {
+      const res = await query(
+        node("iq", { to: jid, type: "get", xmlns: "w:profile:picture" }, [
+          node("picture", { type: hd ? "image" : "preview", query: "url" }),
+        ]),
+      );
+      return getBinaryNodeChild(res, "picture")?.attrs.url || undefined;
+    } catch {
+      // <iq type=error> = sem foto / privado / jid não existe
+      return undefined;
+    }
+  }
+
+  async function fetchStatus(
+    jid: string,
+  ): Promise<{ status?: string; setAt?: Date } | undefined> {
+    try {
+      const res = await query(
+        node("iq", { to: S_WHATSAPP_NET, type: "get", xmlns: "status" }, [
+          node("status", {}, [node("user", { jid })]),
+        ]),
+      );
+      const u = getBinaryNodeChild(getBinaryNodeChild(res, "status"), "user");
+      if (!u) return undefined;
+      const status =
+        typeof u.content === "string"
+          ? u.content
+          : u.content instanceof Uint8Array
+            ? utf8Decode(u.content)
+            : undefined;
+      const t = Number(u.attrs.t);
+      return { status: status || undefined, setAt: Number.isFinite(t) && t > 0 ? new Date(t * 1000) : undefined };
+    } catch {
+      return undefined;
+    }
+  }
+
+  return { setProfilePicture, removeProfilePicture, setBio, getProfilePictureUrl, fetchStatus };
 }

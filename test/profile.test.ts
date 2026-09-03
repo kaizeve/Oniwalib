@@ -64,6 +64,52 @@ const profile = createProfileLayer({ query });
   ok("foto vazia → erro", threw.length > 0, threw);
 }
 
+// --- getProfilePictureUrl -------------------------------------------
+{
+  let seen: BinaryNode | undefined;
+  const p = createProfileLayer({
+    query: async (n) => {
+      seen = n;
+      return node("iq", { type: "result", id: "1" }, [
+        node("picture", { type: "preview", url: "https://pps.whatsapp.net/x.jpg" }),
+      ]);
+    },
+  });
+  const url = await p.getProfilePictureUrl("5511999@s.whatsapp.net");
+  ok("pfp: iq get / to = jid alvo", seen?.attrs.type === "get" && seen?.attrs.to === "5511999@s.whatsapp.net");
+  ok("pfp: <picture query=url type=preview>", getBinaryNodeChild(seen, "picture")?.attrs.query === "url" && getBinaryNodeChild(seen, "picture")?.attrs.type === "preview");
+  ok("pfp: devolve a url", url === "https://pps.whatsapp.net/x.jpg");
+  ok("pfp: hd → type=image", (await createProfileLayer({
+    query: async (n) => { seen = n; return node("iq", { type: "result" }, [node("picture", { url: "u" })]); },
+  }).getProfilePictureUrl("j", true), getBinaryNodeChild(seen, "picture")?.attrs.type === "image"));
+}
+{
+  // <iq type=error> → undefined (sem foto / privado)
+  const p = createProfileLayer({ query: async () => { throw new Error("item-not-found"); } });
+  ok("pfp: erro do servidor → undefined", (await p.getProfilePictureUrl("j")) === undefined);
+}
+
+// --- fetchStatus --------------------------------------------------
+{
+  let seen: BinaryNode | undefined;
+  const p = createProfileLayer({
+    query: async (n) => {
+      seen = n;
+      return node("iq", { type: "result", id: "1" }, [
+        node("status", {}, [node("user", { jid: "5511999@s.whatsapp.net", t: "1700000000" }, "vivendo a vida")]),
+      ]);
+    },
+  });
+  const s = await p.fetchStatus("5511999@s.whatsapp.net");
+  ok("status: iq get / xmlns status", seen?.attrs.type === "get" && seen?.attrs.xmlns === "status");
+  ok("status: <status><user jid>", getBinaryNodeChild(getBinaryNodeChild(seen, "status"), "user")?.attrs.jid === "5511999@s.whatsapp.net");
+  ok("status: texto + data", s?.status === "vivendo a vida" && s?.setAt?.getTime() === 1700000000000);
+}
+{
+  const p = createProfileLayer({ query: async () => node("iq", { type: "result" }, [node("status", {})]) });
+  ok("status: sem <user> → undefined", (await p.fetchStatus("j")) === undefined);
+}
+
 const rt =
   typeof (globalThis as any).Bun !== "undefined"
     ? "bun"

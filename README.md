@@ -9,7 +9,7 @@ It talks the socket directly — no browser, no Puppeteer, no headless Chrome.
 
 <br>
 
-[![tests](https://img.shields.io/badge/tests-1007%2F1007%20passing-2ea44f?style=flat-square)](#tests)
+[![tests](https://img.shields.io/badge/tests-1022%2F1022%20passing-2ea44f?style=flat-square)](#tests)
 [![runtimes](https://img.shields.io/badge/runs%20on-bun%20%C2%B7%20node%20%C2%B7%20RTS-0b7285?style=flat-square)](#status)
 [![language](https://img.shields.io/badge/TypeScript-3178c6?style=flat-square&logo=typescript&logoColor=white)](#)
 [![status](https://img.shields.io/badge/status-early%20%C2%B7%20foundation-d9822b?style=flat-square)](#status)
@@ -185,9 +185,9 @@ image / video / document / sticker send: per-type HKDF → AES-CBC + 10-byte MAC
 `media_conn` `<iq>`, upload POST with host fallback, `*Message` codec roundtrip;
 `downloadMedia` — GET by `url`/`directPath`, verify the 10-byte MAC and
 `fileSha256`, AES-CBC decrypt back to the original bytes) ·
-`profile` 11 (set / remove profile picture, set bio — the `w:profile:picture` /
+`profile` 20 (set / remove profile picture, set bio — the `w:profile:picture` /
 `status` `<iq>`) · `privacy` 11 (`fetchPrivacySettings` / `updatePrivacySetting`
-— the `<iq xmlns="privacy">` `<category>` parse, flat and nested) · `usync` 15
+— the `<iq xmlns="privacy">` `<category>` parse, flat and nested) · `usync` 21
 (`getDeviceList` — the `<iq xmlns="usync">` device-list query + parse, jid
 normalization, dedup) · `groups` 67 (`groupMetadata` — the `<iq xmlns="w:g2">`
 `<group>` parse: subject/owner/participants+admin, `announce`/`restrict`,
@@ -196,7 +196,7 @@ community via `<parent>` / `<linked_parent>`) · `reaction` 19
 revoke → `messages.delete`; `sendReaction` encrypted back) · `pairing` 18 (the
 `<pair-success>` crypto both directions) ·
 `client` 18 (QR → pairing → `515` restart → login `<success>`, over the mock
-server) → **1007 / 1007 on bun**.
+server) → **1022 / 1022 on bun**.
 
 ### <a name="oni-version"></a>Keeping it working — the oni-version
 
