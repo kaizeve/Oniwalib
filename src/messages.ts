@@ -57,6 +57,7 @@ import {
   type E2EMessageKey,
 } from "./proto/e2e-message";
 import type { MessageKey } from "./events/emitter";
+import { buildPollCreation } from "./polls";
 
 export interface MessagesLayerOptions {
   events: Emitter;
@@ -97,6 +98,15 @@ export interface MessagesLayer {
   editMessage(jid: string, key: MessageKey, newText: string): Promise<{ id: string }>;
   /** Apaga uma mensagem para todos (revoke). `key` é a mensagem a apagar. */
   deleteMessage(jid: string, key: MessageKey): Promise<{ id: string }>;
+  /** Cria uma enquete. `selectableCount` 1 = escolha única, >1 = múltipla.
+   *  Devolve o id da mensagem e a `pollEncKey` — GUARDE a chave: é ela que
+   *  decifra os votos (`poll.update` → `decryptPollVote`). */
+  sendPoll(
+    jid: string,
+    name: string,
+    options: string[],
+    selectableCount?: number,
+  ): Promise<{ id: string; pollEncKey: Uint8Array }>;
   /** Garante que há sessão pairwise com cada `jid` (com device): para os que
    *  faltam, busca o bundle (`<iq xmlns="encrypt">`) e roda o X3DH. Precisa de
    *  `query`. Devolve os jids que ficaram SEM sessão (device fora do ar etc.). */
@@ -462,6 +472,17 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
         return msg;
       }
 
+      // Voto em enquete (pollUpdateMessage) — vem cifrado; sai por `poll.update`.
+      if (msg.pollUpdateMessage?.pollCreationMessageKey && msg.pollUpdateMessage.vote) {
+        events.emit("poll.update", {
+          pollCreationKey: toMsgKey(msg.pollUpdateMessage.pollCreationMessageKey, chatId),
+          voterJid: author,
+          vote: msg.pollUpdateMessage.vote,
+          senderTimestampMs: msg.pollUpdateMessage.senderTimestampMs,
+        });
+        return msg;
+      }
+
       const bareSkdm =
         !!msg.senderKeyDistributionMessage &&
         !msg.conversation &&
@@ -690,6 +711,18 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
       },
       { id: key.id, editAttr: true },
     );
+  }
+
+  async function sendPoll(
+    jid: string,
+    name: string,
+    options: string[],
+    selectableCount = 1,
+  ): Promise<{ id: string; pollEncKey: Uint8Array }> {
+    if (options.length < 2) throw new Error("sendPoll: precisa de pelo menos 2 opções");
+    const { message, pollEncKey } = buildPollCreation(c, name, options, selectableCount);
+    const { id } = await sendMessage(jid, message);
+    return { id, pollEncKey };
   }
 
   async function deleteMessage(jid: string, key: MessageKey): Promise<{ id: string }> {
@@ -1018,6 +1051,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     sendMessage,
     editMessage,
     deleteMessage,
+    sendPoll,
     assertSessions,
     sendStatus,
     sendReaction,

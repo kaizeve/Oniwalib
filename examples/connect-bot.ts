@@ -421,6 +421,26 @@ bot.register("bloqueados", "lista os números bloqueados", async () => {
   return l.length ? l.map((j) => "• " + j.split("@")[0]).join("\n") : "ninguém bloqueado.";
 });
 
+// Enquetes: !enquete Pergunta | opção 1 | opção 2 [| opção 3 ...]
+const polls = new Map<string, { options: string[]; key: Uint8Array; tally: Map<string, Set<string>> }>();
+bot.register("enquete", "cria uma enquete: !enquete Pergunta | op1 | op2 | op3", async (args, msg) => {
+  const parts = args.split("|").map((p) => p.trim()).filter(Boolean);
+  if (parts.length < 3) return "uso: !enquete Pergunta | opção 1 | opção 2 [| ...]";
+  const [pergunta, ...opts] = parts;
+  const { id, pollEncKey } = await conn.sendPoll(msg.from, pergunta, opts);
+  polls.set(id, { options: opts, key: pollEncKey, tally: new Map(opts.map((o) => [o, new Set<string>()])) });
+  return "";
+});
+conn.events.on("poll.update", (evt) => {
+  const p = polls.get(evt.pollCreationKey.id);
+  if (!p) return;
+  const picked = conn.readPollVote(evt, p.key, p.options) as string[];
+  for (const set of p.tally.values()) set.delete(evt.voterJid); // último voto vale
+  for (const opt of picked) p.tally.get(opt)?.add(evt.voterJid);
+  const placar = [...p.tally.entries()].map(([o, s]) => `${o}: ${s.size}`).join(" · ");
+  console.log(`🗳️  voto de ${evt.voterJid.split("@")[0]} → ${picked.join(", ") || "(limpou)"} | ${placar}`);
+});
+
 // Recusa chamadas automaticamente (ligue com ONI_REJECT_CALLS=1).
 const rejectCalls = process.env.ONI_REJECT_CALLS === "1";
 conn.events.on("call", (calls) => {

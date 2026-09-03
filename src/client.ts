@@ -8,7 +8,8 @@
 // mensagem chegam, são "ackadas" para o servidor não repetir, e repassadas cruas
 // em `events.on("node.recv")`. Ler o texto exige a camada Signal.
 
-import { Emitter, type MessageKey, type WAPresence } from "./events/emitter";
+import { Emitter, type MessageKey, type WAPresence, type OniwalibEvents } from "./events/emitter";
+import { decryptPollVote, resolvePollVote } from "./polls";
 import { connectOni } from "./connect";
 import { configureSuccessfulPairing } from "./pairing";
 import { createMessagesLayer, type MessagesLayer } from "./messages";
@@ -130,6 +131,22 @@ export interface OniConnection {
   editMessage(jid: string, key: MessageKey, newText: string): Promise<{ id: string }>;
   /** Apaga uma mensagem para todos (revoke). */
   deleteMessage(jid: string, key: MessageKey): Promise<{ id: string }>;
+  /** Cria uma enquete. Devolve o id e a `pollEncKey` — guarde a chave para
+   *  decifrar os votos depois (`poll.update` → `readPollVote`). */
+  sendPoll(
+    jid: string,
+    name: string,
+    options: string[],
+    selectableCount?: number,
+  ): Promise<{ id: string; pollEncKey: Uint8Array }>;
+  /** Decifra um voto (`poll.update`). Passe a `pollEncKey` que você guardou ao
+   *  criar a enquete e a lista de opções. Devolve os NOMES votados (ou os
+   *  hashes crus se `optionNames` não vier). */
+  readPollVote(
+    evt: OniwalibEvents["poll.update"],
+    pollEncKey: Uint8Array,
+    optionNames?: string[],
+  ): string[] | Uint8Array[];
   /** Abre sessão Signal com `jids` que ainda não têm uma (busca o bundle de
    *  pré-chaves e roda o X3DH). `sendText`/`sendMessage` 1:1 já chamam isto
    *  sozinhos; use direto para pré-aquecer. Devolve os jids que ficaram sem
@@ -937,6 +954,20 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     sendMessage: (jid, msg) => messages.sendMessage(jid, msg),
     editMessage: (jid, key, newText) => messages.editMessage(jid, key, newText),
     deleteMessage: (jid, key) => messages.deleteMessage(jid, key),
+    sendPoll: (jid, name, options, selectableCount) =>
+      messages.sendPoll(jid, name, options, selectableCount),
+    readPollVote: (evt, pollEncKey, optionNames) => {
+      const k = evt.pollCreationKey;
+      const meId = auth.creds.me?.id ?? "";
+      const pollCreatorJid = k.fromMe ? meId : k.participant || k.remoteJid;
+      if (!evt.vote.encPayload || !evt.vote.encIv) return [];
+      const { selectedOptions } = decryptPollVote(
+        c,
+        { encPayload: evt.vote.encPayload, encIv: evt.vote.encIv },
+        { pollMsgId: k.id, pollCreatorJid, voterJid: evt.voterJid, pollEncKey },
+      );
+      return optionNames ? resolvePollVote(c, optionNames, selectedOptions) : selectedOptions;
+    },
     assertSessions: (jids) => messages.assertSessions(jids),
     sendAudio: async (jid, data, o2) => messages.sendMessage(jid, await media.buildAudioMessage(data, o2)),
     sendImage: async (jid, data, o2) => messages.sendMessage(jid, await media.buildImageMessage(data, o2)),

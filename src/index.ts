@@ -152,6 +152,15 @@ export {
   type CallsLayerOptions,
 } from "./calls";
 export {
+  buildPollCreation,
+  decryptPollVote,
+  resolvePollVote,
+  pollOptionHash,
+  tallyPoll,
+  type PollCreate,
+  type PollVoteContext,
+} from "./polls";
+export {
   createBlocklistLayer,
   parseBlocklist,
   type BlocklistLayer,

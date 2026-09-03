@@ -63,6 +63,17 @@ export interface OniwalibEvents {
     participants: string[];
     action: "add" | "remove" | "promote" | "demote" | "modify";
   };
+  /** Alguém votou numa enquete. O voto vem CIFRADO — decifre com
+   *  `decryptPollVote` (de `src/polls`) usando a `pollEncKey` que você guardou
+   *  ao criar a enquete (`messageContextInfo.messageSecret`). */
+  "poll.update": {
+    /** key da mensagem de CRIAÇÃO da enquete. */
+    pollCreationKey: MessageKey;
+    /** quem votou. */
+    voterJid: string;
+    vote: { encPayload?: Uint8Array; encIv?: Uint8Array };
+    senderTimestampMs?: number;
+  };
   /** Uma chamada (voz/vídeo) — oferta, aceite, ou fim. */
   "call": WACall[];
   /** A blocklist da conta mudou. `action` ausente = lista completa (no fetch

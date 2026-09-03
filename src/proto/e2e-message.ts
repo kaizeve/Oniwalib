@@ -236,6 +236,20 @@ export interface E2EMessage {
   };
   reactionMessage?: E2EReactionMessage;
   protocolMessage?: E2EProtocolMessage;
+  /** Enquete (campo 49). `encKey` NÃO vai aqui — vai em
+   *  `messageContextInfo.messageSecret`. */
+  pollCreationMessage?: {
+    name?: string;
+    options?: Array<{ optionName?: string }>;
+    selectableOptionsCount?: number;
+  };
+  /** Voto numa enquete (campo 50). O voto em si é cifrado (`vote.encPayload`
+   *  / `vote.encIv`) — ver `src/polls`. */
+  pollUpdateMessage?: {
+    pollCreationMessageKey?: E2EMessageKey;
+    vote?: { encPayload?: Uint8Array; encIv?: Uint8Array };
+    senderTimestampMs?: number;
+  };
 }
 
 //   message MessageKey {
@@ -520,6 +534,27 @@ export function encodeE2EMessage(m: E2EMessage): Uint8Array {
     if (p.timestampMs) sub.uint(15, p.timestampMs);
     w.message(12, sub);
   }
+  if (m.pollCreationMessage) {
+    const p = m.pollCreationMessage;
+    const sub = new Writer();
+    sub.string(2, p.name);
+    for (const o of p.options ?? []) sub.message(3, new Writer().string(1, o.optionName));
+    if (p.selectableOptionsCount) sub.uint(4, p.selectableOptionsCount);
+    w.message(49, sub);
+  }
+  if (m.pollUpdateMessage) {
+    const p = m.pollUpdateMessage;
+    const sub = new Writer();
+    if (p.pollCreationMessageKey) sub.message(1, messageKeyWriter(p.pollCreationMessageKey));
+    if (p.vote) {
+      sub.message(
+        2,
+        new Writer().bytes(1, p.vote.encPayload).bytes(2, p.vote.encIv),
+      );
+    }
+    if (p.senderTimestampMs) sub.uint(4, p.senderTimestampMs);
+    w.message(50, sub);
+  }
   return w.finish();
 }
 
@@ -795,6 +830,36 @@ export function decodeE2EMessage(bytes: Uint8Array): E2EMessage {
       text: asStr(sf.get(2)?.[0]) ?? "",
       groupingKey: asStr(sf.get(3)?.[0]),
       senderTimestampMs: typeof ts === "number" ? ts : undefined,
+    };
+  }
+
+  const pcm = asBytes(f.get(49)?.[0]);
+  if (pcm) {
+    const sf = new Reader(pcm).fields();
+    const cnt = sf.get(4)?.[0];
+    out.pollCreationMessage = {
+      name: asStr(sf.get(2)?.[0]),
+      options: (sf.get(3) ?? []).map((o) => ({
+        optionName: asStr(new Reader(o as Uint8Array).fields().get(1)?.[0]),
+      })),
+      selectableOptionsCount: typeof cnt === "number" ? cnt : undefined,
+    };
+  }
+
+  const pum = asBytes(f.get(50)?.[0]);
+  if (pum) {
+    const sf = new Reader(pum).fields();
+    const voteB = asBytes(sf.get(2)?.[0]);
+    const tsMs = sf.get(4)?.[0];
+    out.pollUpdateMessage = {
+      pollCreationMessageKey: decodeMessageKey(asBytes(sf.get(1)?.[0])),
+      vote: voteB
+        ? (() => {
+            const vf = new Reader(voteB).fields();
+            return { encPayload: asBytes(vf.get(1)?.[0]), encIv: asBytes(vf.get(2)?.[0]) };
+          })()
+        : undefined,
+      senderTimestampMs: typeof tsMs === "number" ? tsMs : undefined,
     };
   }
 
