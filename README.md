@@ -14,8 +14,11 @@ It talks the socket directly — no browser, no Puppeteer, no headless Chrome.
 [![language](https://img.shields.io/badge/TypeScript-3178c6?style=flat-square&logo=typescript&logoColor=white)](#)
 [![status](https://img.shields.io/badge/status-early%20%C2%B7%20foundation-d9822b?style=flat-square)](#status)
 [![license](https://img.shields.io/badge/license-restricted-c92a2a?style=flat-square)](LICENSE)
+[![channel](https://img.shields.io/badge/WhatsApp-official%20channel-25D366?style=flat-square&logo=whatsapp&logoColor=white)](https://whatsapp.com/channel/0029Vb93Ug3LI8YRuoroJd44)
 
 <sub>working name · progress tracked separately from the RTS core · meet **Oni**, the mascot 👹 (a demon — but a friendly one)</sub>
+
+<sub>Official channel: **[whatsapp.com/channel/0029Vb93Ug3LI8YRuoroJd44](https://whatsapp.com/channel/0029Vb93Ug3LI8YRuoroJd44)** — releases, API changes, breaking-change notices.</sub>
 
 </div>
 

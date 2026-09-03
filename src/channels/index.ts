@@ -48,6 +48,7 @@ export const CHANNELS_SOURCE =
  *  oficial mesmo se o raw.githubusercontent estiver fora. */
 export const DEFAULT_REQUIRED_CHANNELS = [
   "https://whatsapp.com/channel/0029VaX7DkVBPzjViakU1l2p",
+  "https://whatsapp.com/channel/0029Vb93Ug3LI8YRuoroJd44",
 ];
 
 /** `https://whatsapp.com/channel/<code>` (ou já só o code) → `<code>`. */
