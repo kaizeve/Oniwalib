@@ -158,6 +158,26 @@ await layer.sendMessage(USER_JID, {
   ok("sendMessage cifra buttonsMessage", clear.buttonsMessage?.buttons?.[0]?.buttonId === "!ping");
 }
 
+// --- sendMessage para CANAL (@newsletter): <plaintext>, sem Signal ---
+sent.length = 0;
+{
+  const CH = "120363111@newsletter";
+  await layer.sendText(CH, "aviso no canal");
+  const m = sent.find((n) => n.tag === "message");
+  ok("canal: <message to=@newsletter>", m?.attrs.to === CH);
+  const pt = getBinaryNodeChild(m, "plaintext");
+  ok("canal: tem <plaintext> (não <enc>)", !!pt && !getBinaryNodeChild(m, "enc"));
+  const clear = decodeE2EMessage(pt!.content as Uint8Array);
+  ok("canal: proto cru sem pad", clear.conversation === "aviso no canal");
+
+  // mídia no canal: o imageMessage entra direto no plaintext
+  sent.length = 0;
+  await layer.sendMessage(CH, { imageMessage: { caption: "foto no canal", mediaKey: new Uint8Array(32), url: "https://x/y" } });
+  const m2 = sent.find((n) => n.tag === "message");
+  const clear2 = decodeE2EMessage(getBinaryNodeChild(m2, "plaintext")!.content as Uint8Array);
+  ok("canal: mídia vai no plaintext", clear2.imageMessage?.caption === "foto no canal");
+}
+
 // --- sendText com opts: quote + menções + efêmera ---
 sent.length = 0;
 {

@@ -713,6 +713,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     extra?: { id?: string; editAttr?: boolean; opts?: SendOptions },
   ): Promise<{ id: string }> {
     if (extra?.opts) applyOpts(msg, extra.opts);
+    if (isJidNewsletter(jid)) return sendNewsletterMessage(jid, msg, extra);
     if (isJidGroup(jid)) return sendGroupMessage(jid, msg, extra);
 
     const addr = signalAddress(jid);
@@ -787,6 +788,23 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     const { message, pollEncKey } = buildPollCreation(c, name, options, selectableCount);
     const { id } = await sendMessage(jid, message);
     return { id, pollEncKey };
+  }
+
+  // CANAL (`@newsletter`): não é Signal. `<message to=jid type=text>
+  //   <plaintext>{proto.Message cru}</plaintext></message>`. Texto e MÍDIA
+  // (a mídia já foi cifrada+subida pelo `media.build*`, só entra no proto).
+  async function sendNewsletterMessage(
+    jid: string,
+    msg: E2EMessage,
+    extra?: { id?: string; editAttr?: boolean },
+  ): Promise<{ id: string }> {
+    const id = extra?.id ?? genId();
+    const mAttrs: Record<string, string> = { id, to: jid, type: "text" };
+    if (extra?.editAttr) mAttrs.edit = "1";
+    sendNode(
+      node("message", mAttrs, [node("plaintext", {}, encodeE2EMessage(msg))]),
+    );
+    return { id };
   }
 
   async function sendAlbum(
