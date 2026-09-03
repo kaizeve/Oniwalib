@@ -242,6 +242,36 @@ const JID = "120363000000000000@newsletter";
   ok("react vazio: edit=7 e <reaction> sem code", rmsg2.attrs.edit === "7" && !rchild2?.attrs.code);
 }
 
+// --- fetch de mensagens + subscribe live updates -------------------
+{
+  const seenIqs: BinaryNode[] = [];
+  const { encodeE2EMessage } = await import("../src/proto/e2e-message");
+  const query4 = async (iq: BinaryNode): Promise<BinaryNode> => {
+    seenIqs.push(iq);
+    if (getBinaryNodeChild(iq, "message_updates")) {
+      return node("iq", { type: "result" }, [
+        node("message_updates", {}, [
+          node("message", { server_id: "100" }, [node("plaintext", {}, encodeE2EMessage({ conversation: "post antigo" }))]),
+          node("message", { server_id: "101" }, [node("plaintext", {}, encodeE2EMessage({ conversation: "outro post" }))]),
+        ]),
+      ]);
+    }
+    return node("iq", { type: "result" }, [node("live_updates", { duration: "300" })]);
+  };
+  const ch4 = createChannelsLayer({ query: query4 });
+
+  const msgs = await ch4.newsletterFetchMessages(JID, 10, { after: 99 });
+  const fetchIq = seenIqs.find((i) => getBinaryNodeChild(i, "message_updates"));
+  ok("fetchMessages: iq get xmlns newsletter to jid", fetchIq?.attrs.type === "get" && fetchIq?.attrs.xmlns === "newsletter" && fetchIq?.attrs.to === JID);
+  ok("fetchMessages: count + after nos attrs", getBinaryNodeChild(fetchIq, "message_updates")?.attrs.count === "10" && getBinaryNodeChild(fetchIq, "message_updates")?.attrs.after === "99");
+  ok("fetchMessages: 2 mensagens decodificadas", msgs.length === 2 && msgs[0]?.serverId === 100 && msgs[0]?.message?.conversation === "post antigo");
+
+  const sub = await ch4.subscribeNewsletterUpdates(JID);
+  const subIq = seenIqs.find((i) => getBinaryNodeChild(i, "live_updates"));
+  ok("subscribe: iq set <live_updates>", subIq?.attrs.type === "set" && subIq?.attrs.xmlns === "newsletter");
+  ok("subscribe: devolve duração", sub?.duration === 300);
+}
+
 const rt =
   typeof (globalThis as any).Bun !== "undefined"
     ? "bun"

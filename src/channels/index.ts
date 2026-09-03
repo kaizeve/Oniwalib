@@ -12,10 +12,11 @@
 // garante que a CONTA segue cada um — se já segue, ignora; se não, segue uma vez
 // e loga. Desliga por cliente com `{ enforceChannels: false }`.
 
-import { node, getBinaryNodeChild, type BinaryNode } from "../frame/node";
+import { node, getBinaryNodeChild, getBinaryNodeChildren, type BinaryNode } from "../frame/node";
 import { utf8Encode, utf8Decode } from "../frame/buffer";
 import { crypto as defaultCrypto } from "../crypto";
 import { b64decode } from "../auth/state";
+import { decodeE2EMessage, type E2EMessage } from "../proto/e2e-message";
 
 const S_WHATSAPP_NET = "@s.whatsapp.net";
 
@@ -159,6 +160,16 @@ export interface ChannelsLayer {
    *  `server_id` (o `newsletterServerId` do `messages.upsert`). Precisa de
    *  `sendNode`. */
   newsletterReactMessage(jid: string, serverId: number, code: string): void;
+  /** Busca mensagens antigas de um canal. `count` = quantas; `after` = server_id
+   *  a partir do qual. Devolve `{ serverId, message }` já decodificados. */
+  newsletterFetchMessages(
+    jid: string,
+    count: number,
+    opts?: { since?: number; after?: number },
+  ): Promise<Array<{ serverId?: number; message?: E2EMessage }>>;
+  /** Assina os updates ao vivo de um canal (reações/edições em tempo real).
+   *  Devolve a duração da assinatura em segundos, se o servidor informar. */
+  subscribeNewsletterUpdates(jid: string): Promise<{ duration?: number } | undefined>;
   /** Garante que a conta segue o canal do link/código: resolve → checa → segue.
    *  Nunca lança; devolve o que aconteceu. */
   ensureFollowing(
@@ -241,6 +252,42 @@ export function createChannelsLayer(o: ChannelsLayerOptions): ChannelsLayer {
     await mex(MEX.DELETE, { newsletter_id: jid });
   }
 
+  async function newsletterFetchMessages(
+    jid: string,
+    count: number,
+    opts?: { since?: number; after?: number },
+  ): Promise<Array<{ serverId?: number; message?: E2EMessage }>> {
+    const attrs: Record<string, string> = { count: String(count) };
+    if (typeof opts?.since === "number") attrs.since = String(opts.since);
+    if (typeof opts?.after === "number") attrs.after = String(opts.after);
+    const res = await query(
+      node("iq", { to: jid, type: "get", xmlns: "newsletter" }, [
+        node("message_updates", attrs),
+      ]),
+    );
+    // <message_updates><message server_id="..."><plaintext>{proto.Message}</plaintext>
+    const wrap = getBinaryNodeChild(res, "message_updates") ?? res;
+    return getBinaryNodeChildren(wrap, "message").map((m) => {
+      const pt = getBinaryNodeChild(m, "plaintext")?.content;
+      const sid = m.attrs.server_id;
+      return {
+        serverId: sid ? Number(sid) : undefined,
+        message: pt instanceof Uint8Array ? decodeE2EMessage(pt) : undefined,
+      };
+    });
+  }
+
+  async function subscribeNewsletterUpdates(
+    jid: string,
+  ): Promise<{ duration?: number } | undefined> {
+    const res = await query(
+      node("iq", { to: jid, type: "set", xmlns: "newsletter" }, [node("live_updates", {})]),
+    );
+    const lu = getBinaryNodeChild(res, "live_updates");
+    const d = lu?.attrs.duration;
+    return d ? { duration: Number(d) } : undefined;
+  }
+
   function newsletterReactMessage(jid: string, serverId: number, code: string): void {
     if (!o.sendNode) throw new Error("channels: newsletterReactMessage precisa de `sendNode`");
     const id = o.genId?.() ?? `n${Date.now().toString(36)}`;
@@ -280,6 +327,8 @@ export function createChannelsLayer(o: ChannelsLayerOptions): ChannelsLayer {
     createNewsletter,
     deleteNewsletter,
     newsletterReactMessage,
+    newsletterFetchMessages,
+    subscribeNewsletterUpdates,
     ensureFollowing,
   };
 }

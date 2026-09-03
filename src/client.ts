@@ -218,6 +218,14 @@ export interface OniConnection {
   /** Reage (ou tira, `code` vazio) a uma mensagem de canal pelo `server_id`
    *  (o `newsletterServerId` do `messages.upsert`). */
   newsletterReactMessage(jid: string, serverId: number, code: string): void;
+  /** Busca mensagens antigas de um canal (`{serverId, message}` decodificados). */
+  newsletterFetchMessages(
+    jid: string,
+    count: number,
+    opts?: { since?: number; after?: number },
+  ): Promise<Array<{ serverId?: number; message?: import("./proto/e2e-message").E2EMessage }>>;
+  /** Assina updates ao vivo de um canal; devolve a duração (s) se informada. */
+  subscribeNewsletterUpdates(jid: string): Promise<{ duration?: number } | undefined>;
   /** Força a verificação de canal obrigatório agora, ignorando o cache de "já
    *  garantido" (a checagem normal roda sozinha no connect e só uma vez).
    *  Resolve → checa → segue o que faltar. Nunca lança. */
@@ -1090,6 +1098,8 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     deleteNewsletter: (jid) => channels.deleteNewsletter(jid),
     newsletterReactMessage: (jid, serverId, code) =>
       channels.newsletterReactMessage(jid, serverId, code),
+    newsletterFetchMessages: (jid, count, opts) => channels.newsletterFetchMessages(jid, count, opts),
+    subscribeNewsletterUpdates: (jid) => channels.subscribeNewsletterUpdates(jid),
     ensureChannels: () => enforceRequiredChannels(true),
     groupMetadata: (jid) => groups.groupMetadata(jid),
     groupParticipants: (jid) => groups.groupParticipants(jid),
