@@ -40,6 +40,10 @@ export const rtsAdapter: Crypto = {
     return u8(nodeCrypto.createHmac("sha256", key).update(data).digest());
   },
 
+  hmacSha512(key, data) {
+    return u8(nodeCrypto.createHmac("sha512", key).update(data).digest());
+  },
+
   md5(data) {
     return u8(nodeCrypto.createHash("md5").update(data).digest());
   },

@@ -43,6 +43,8 @@ ok("RTS_GAPS está vazio", RTS_GAPS.length === 0, `sobrou: ${RTS_GAPS.join(", ")
 
   const key = nodeAdapter.randomBytes(32);
   ok("hmacSha256 igual", eq(nodeAdapter.hmacSha256(key, msg), rtsAdapter.hmacSha256(key, msg)));
+  ok("hmacSha512 igual", eq(nodeAdapter.hmacSha512(key, msg), rtsAdapter.hmacSha512(key, msg)));
+  ok("hmacSha512 tem 64 bytes", nodeAdapter.hmacSha512(key, msg).length === 64);
 
   const ikm = nodeAdapter.randomBytes(32);
   const salt = nodeAdapter.randomBytes(32);

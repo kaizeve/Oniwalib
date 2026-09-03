@@ -29,6 +29,9 @@ export interface Crypto {
   /** HMAC-SHA-256. */
   hmacSha256(key: Uint8Array, data: Uint8Array): Uint8Array;
 
+  /** HMAC-SHA-512 — usado no MAC de valor do app-state sync (LT-hash). */
+  hmacSha512(key: Uint8Array, data: Uint8Array): Uint8Array;
+
   /** MD5 — só para o `buildHash` do handshake (não é primitivo de segurança). */
   md5?(data: Uint8Array): Uint8Array;
 

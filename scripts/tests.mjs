@@ -18,7 +18,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FILES = [
   "version", "wire", "wabinary", "jid", "e2e-message", "crypto", "noise", "auth",
   "file-state", "socket", "signal", "lid", "sender-key", "prekeys", "messages", "media",
-  "profile", "privacy", "usync", "groups", "channels", "reaction", "presence",
+  "profile", "privacy", "usync", "groups", "appstate", "channels", "reaction", "presence",
   "notifications", "bot", "pairing", "client",
 ];
 

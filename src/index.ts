@@ -117,6 +117,31 @@ export {
 } from "./groups";
 
 export {
+  makeLtHash,
+  newLTHashState,
+  decodeSyncdPatch,
+  decodeSyncdSnapshot,
+  decodePatches,
+  decodeSyncdMutations,
+  encodeSyncdPatch,
+  extractSyncdPatches,
+  chatModificationToAppPatch,
+  decodeAppStateSyncKeyShare,
+  ALL_PATCH_NAMES,
+  type LtHash,
+  type LTHashState,
+  type WAPatchName,
+  type WAPatchCreate,
+  type ChatMutation,
+  type ChatModification,
+  type FetchAppStateSyncKey,
+  type DownloadExternalBlob,
+  type CollectionPatches,
+  type SyncActionValue,
+  type AppStateSyncKey,
+} from "./appstate";
+
+export {
   createChannelsLayer,
   resolveRequiredChannels,
   inviteCodeOf,
