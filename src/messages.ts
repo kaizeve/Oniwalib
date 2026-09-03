@@ -1021,6 +1021,11 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
         );
       }
     }
+    // eslint-disable-next-line no-console
+    console.log(
+      `sendStatus: ${targets.length} destinatário(s) → ${deviceJids.length} device(s)` +
+        (deviceJids === targets ? " (USYNC não resolveu — só primário!)" : ` [${deviceJids.join(", ")}]`),
+    );
 
     if (query) {
       try {
