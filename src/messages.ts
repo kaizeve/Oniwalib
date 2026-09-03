@@ -633,6 +633,9 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
       msg.audioMessage ??
       msg.documentMessage ??
       msg.stickerMessage ??
+      msg.contactMessage ??
+      msg.contactsArrayMessage ??
+      msg.locationMessage ??
       msg.albumMessage;
     if (holder) {
       holder.contextInfo = { ...(holder.contextInfo ?? {}), ...ci };

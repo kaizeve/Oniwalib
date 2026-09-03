@@ -307,6 +307,22 @@ bot.register(
 bot.register("story", "alias de !storys", storysCmd);
 bot.register("stories", "alias de !storys", storysCmd);
 
+bot.register("local", "manda um pino de localização: !local <lat> <lng> [nome]", async (args, msg) => {
+  const [lat, lng, ...rest] = args.trim().split(/\s+/);
+  const la = Number(lat);
+  const ln = Number(lng);
+  if (!Number.isFinite(la) || !Number.isFinite(ln)) return "uso: !local <lat> <lng> [nome]";
+  await conn.sendLocation(msg.from, { latitude: la, longitude: ln, name: rest.join(" ") || undefined });
+  return undefined;
+});
+
+bot.register("contato", "manda um cartão de contato: !contato <nome> <telefone>", async (args, msg) => {
+  const m = args.trim().match(/^(.+?)\s+(\+?\d[\d\s-]{6,})$/);
+  if (!m) return "uso: !contato <nome> <telefone>";
+  await conn.sendContact(msg.from, { name: m[1]!.trim(), phone: m[2]!.replace(/[\s-]/g, "") });
+  return undefined;
+});
+
 bot.register("nome", "troca o nome do perfil do bot (!nome <texto>)", async (args) => {
   const name = args.trim();
   if (!name) return "uso: !nome <texto>";

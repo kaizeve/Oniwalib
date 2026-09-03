@@ -306,6 +306,50 @@ ok("conversation vira 0a026f69", hex(encodeE2EMessage({ conversation: "oi" })) =
   ok("viewOnceV2 aninhado", back.viewOnceMessageV2?.message?.imageMessage?.caption === "só uma vez");
 }
 
+// contactMessage (4)
+{
+  const back = decodeE2EMessage(
+    encodeE2EMessage({ contactMessage: { displayName: "Fulano", vcard: "BEGIN:VCARD\nFN:Fulano\nEND:VCARD" } }),
+  );
+  ok("contact: displayName", back.contactMessage?.displayName === "Fulano");
+  ok("contact: vcard inteiro", back.contactMessage?.vcard === "BEGIN:VCARD\nFN:Fulano\nEND:VCARD");
+}
+
+// contactsArrayMessage (13)
+{
+  const back = decodeE2EMessage(
+    encodeE2EMessage({
+      contactsArrayMessage: {
+        displayName: "A, B",
+        contacts: [
+          { displayName: "A", vcard: "vA" },
+          { displayName: "B", vcard: "vB" },
+        ],
+      },
+    }),
+  );
+  ok("contactsArray: 2 contatos", back.contactsArrayMessage?.contacts?.length === 2);
+  ok("contactsArray: 2º contato", back.contactsArrayMessage?.contacts?.[1]?.displayName === "B" && back.contactsArrayMessage?.contacts?.[1]?.vcard === "vB");
+}
+
+// locationMessage (5) — lat/long são double
+{
+  const back = decodeE2EMessage(
+    encodeE2EMessage({
+      locationMessage: {
+        degreesLatitude: -23.55052,
+        degreesLongitude: -46.633308,
+        name: "Sé",
+        address: "Praça da Sé, São Paulo",
+        isLive: false,
+      },
+    }),
+  );
+  ok("location: latitude (double exato)", back.locationMessage?.degreesLatitude === -23.55052);
+  ok("location: longitude (double exato)", back.locationMessage?.degreesLongitude === -46.633308);
+  ok("location: name / address", back.locationMessage?.name === "Sé" && back.locationMessage?.address === "Praça da Sé, São Paulo");
+}
+
 const rt =
   typeof (globalThis as any).Bun !== "undefined"
     ? "bun"

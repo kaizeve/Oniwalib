@@ -78,6 +78,17 @@ export class Writer {
     return this.bytes(field, sub.finish());
   }
 
+  /** `double` IEEE-754 (wire type I64, 8 bytes little-endian). Usado por
+   *  lat/long de `locationMessage`. Ignora `undefined`/`NaN`. */
+  double(field: number, value: number | undefined): this {
+    if (value === undefined || Number.isNaN(value)) return this;
+    this.tag(field, WIRE.I64);
+    const dv = new DataView(new ArrayBuffer(8));
+    dv.setFloat64(0, value, true);
+    for (let i = 0; i < 8; i++) this.buf.push(dv.getUint8(i));
+    return this;
+  }
+
   finish(): Uint8Array {
     return Uint8Array.from(this.buf);
   }
@@ -86,8 +97,15 @@ export class Writer {
 export interface Field {
   field: number;
   wire: number;
-  /** varint/i32/i64 → number; LEN → Uint8Array */
+  /** varint/i32 → number; LEN e I64 → Uint8Array */
   value: number | Uint8Array;
+}
+
+/** Interpreta um valor I64 do Reader (8 bytes LE) como `double` IEEE-754.
+ *  `undefined` se não vier ou não tiver 8 bytes. */
+export function readFloat64LE(v: number | Uint8Array | undefined): number | undefined {
+  if (!(v instanceof Uint8Array) || v.length < 8) return undefined;
+  return new DataView(v.buffer, v.byteOffset, 8).getFloat64(0, true);
 }
 
 export class Reader {
@@ -118,9 +136,12 @@ export class Reader {
       case WIRE.VARINT:
         return { field, wire, value: this.varint() };
       case WIRE.I64: {
-        let v = 0;
-        for (let k = 0; k < 8; k++) v += this.buf[this.i++]! * 2 ** (8 * k);
-        return { field, wire, value: v };
+        // devolve os 8 bytes crus (LE) — o consumidor decide se é u64 ou double
+        // (`readFloat64LE`). Nada no WhatsApp que a gente lê hoje usa I64 como
+        // inteiro; `double` (lat/long) precisa dos bytes.
+        const bytes = this.buf.subarray(this.i, this.i + 8);
+        this.i += 8;
+        return { field, wire, value: bytes };
       }
       case WIRE.LEN: {
         const len = this.varint();

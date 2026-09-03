@@ -1,6 +1,6 @@
 // Codec protobuf: vetores conhecidos + round-trips, e o HandshakeMessage real.
 
-import { Reader, Writer } from "../src/proto/wire";
+import { Reader, Writer, readFloat64LE } from "../src/proto/wire";
 import { decodeHandshake, encodeHandshake } from "../src/noise/wire";
 import { encodeClientPayload } from "../src/proto/client-payload";
 import { buildClientPayload } from "../src/proto/handshake";
@@ -33,6 +33,22 @@ ok(
 ok("bool true no campo 2", hex(new Writer().bool(2, true).finish()) === "1001");
 // zero/false/vazio não emitem nada (proto3)
 ok("zero não emite", new Writer().uint(1, 0).bool(2, false).string(3, "").finish().length === 0);
+
+// --- double (I64) ----------------------------------------------------
+{
+  // field 1, double 1.0 → 09 00 00 00 00 00 00 f0 3f  (IEEE-754 LE)
+  ok("double 1.0 no campo 1", hex(new Writer().double(1, 1).finish()) === "09000000000000f03f");
+  const lat = -23.55052;
+  const lng = -46.633308;
+  const w = new Writer().double(1, lat).double(2, lng).string(3, "x").finish();
+  const f = new Reader(w).fields();
+  ok("double round-trip: latitude", readFloat64LE(f.get(1)?.[0]) === lat);
+  ok("double round-trip: longitude", readFloat64LE(f.get(2)?.[0]) === lng);
+  ok("double: campo string ao lado intacto", f.get(3)?.[0] instanceof Uint8Array);
+  ok("double: undefined não emite", new Writer().double(1, undefined).finish().length === 0);
+  ok("double: NaN não emite", new Writer().double(1, NaN).finish().length === 0);
+  ok("readFloat64LE de não-bytes → undefined", readFloat64LE(42) === undefined);
+}
 
 // --- round-trips --------------------------------------------------
 {

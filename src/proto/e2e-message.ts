@@ -26,7 +26,7 @@
 // Os builders "amigáveis" (com defaults) ficam em `proto/message.ts`; aqui é só
 // o que precisa virar bytes de verdade.
 
-import { Reader, Writer } from "./wire";
+import { Reader, Writer, readFloat64LE } from "./wire";
 import { utf8Decode } from "../frame/buffer";
 
 export interface E2EButtonsMessage {
@@ -253,6 +253,26 @@ export interface E2EMessage {
   videoMessage?: E2EVideoMessage;
   documentMessage?: E2EDocumentMessage;
   stickerMessage?: E2EStickerMessage;
+  /** Cartão de contato (campo 4). `vcard` é o texto vCard 3.0 inteiro. */
+  contactMessage?: { displayName?: string; vcard?: string; contextInfo?: E2EContextInfo };
+  /** Vários contatos de uma vez (campo 13). */
+  contactsArrayMessage?: {
+    displayName?: string;
+    contacts?: Array<{ displayName?: string; vcard?: string }>;
+    contextInfo?: E2EContextInfo;
+  };
+  /** Localização fixa (campo 5). Lat/long são `double`. */
+  locationMessage?: {
+    degreesLatitude?: number;
+    degreesLongitude?: number;
+    name?: string;
+    address?: string;
+    url?: string;
+    isLive?: boolean;
+    accuracyInMeters?: number;
+    jpegThumbnail?: Uint8Array;
+    contextInfo?: E2EContextInfo;
+  };
   /** Container de álbum (campo 83): mande isto primeiro, depois cada mídia com
    *  `messageContextInfo.messageAssociation` apontando para a key dele. */
   albumMessage?: {
@@ -548,6 +568,35 @@ export function encodeE2EMessage(m: E2EMessage): Uint8Array {
     { const c = ctxWriter(a.contextInfo); if (c) sub.message(17, c); }
     w.message(26, sub);
   }
+  if (m.contactMessage) {
+    const a = m.contactMessage;
+    const sub = new Writer().string(1, a.displayName).string(16, a.vcard);
+    { const c = ctxWriter(a.contextInfo); if (c) sub.message(17, c); }
+    w.message(4, sub);
+  }
+  if (m.contactsArrayMessage) {
+    const a = m.contactsArrayMessage;
+    const sub = new Writer().string(1, a.displayName);
+    for (const ct of a.contacts ?? []) {
+      sub.message(2, new Writer().string(1, ct.displayName).string(16, ct.vcard));
+    }
+    { const c = ctxWriter(a.contextInfo); if (c) sub.message(17, c); }
+    w.message(13, sub);
+  }
+  if (m.locationMessage) {
+    const a = m.locationMessage;
+    const sub = new Writer();
+    sub.double(1, a.degreesLatitude);
+    sub.double(2, a.degreesLongitude);
+    sub.string(3, a.name);
+    sub.string(4, a.address);
+    sub.string(7, a.url);
+    if (a.isLive) sub.bool(8, a.isLive);
+    if (a.accuracyInMeters !== undefined) sub.uint(9, a.accuracyInMeters);
+    sub.bytes(16, a.jpegThumbnail);
+    { const c = ctxWriter(a.contextInfo); if (c) sub.message(17, c); }
+    w.message(5, sub);
+  }
   if (m.deviceSentMessage) {
     const sub = new Writer().string(1, m.deviceSentMessage.destinationJid);
     if (m.deviceSentMessage.message) sub.bytes(2, encodeE2EMessage(m.deviceSentMessage.message));
@@ -831,6 +880,46 @@ export function decodeE2EMessage(bytes: Uint8Array): E2EMessage {
       fileLength: n(9),
       mediaKeyTimestamp: n(10),
       isAnimated: sf.get(13)?.[0] === 1,
+      contextInfo: decodeCtx(asBytes(sf.get(17)?.[0])),
+    };
+  }
+
+  const contact = asBytes(f.get(4)?.[0]);
+  if (contact) {
+    const sf = new Reader(contact).fields();
+    out.contactMessage = {
+      displayName: asStr(sf.get(1)?.[0]),
+      vcard: asStr(sf.get(16)?.[0]),
+      contextInfo: decodeCtx(asBytes(sf.get(17)?.[0])),
+    };
+  }
+
+  const contacts = asBytes(f.get(13)?.[0]);
+  if (contacts) {
+    const sf = new Reader(contacts).fields();
+    out.contactsArrayMessage = {
+      displayName: asStr(sf.get(1)?.[0]),
+      contacts: (sf.get(2) ?? [])
+        .map((v) => (v instanceof Uint8Array ? new Reader(v).fields() : undefined))
+        .filter((x): x is NonNullable<typeof x> => !!x)
+        .map((cf) => ({ displayName: asStr(cf.get(1)?.[0]), vcard: asStr(cf.get(16)?.[0]) })),
+      contextInfo: decodeCtx(asBytes(sf.get(17)?.[0])),
+    };
+  }
+
+  const loc = asBytes(f.get(5)?.[0]);
+  if (loc) {
+    const sf = new Reader(loc).fields();
+    const n = (k: number) => (typeof sf.get(k)?.[0] === "number" ? (sf.get(k)![0] as number) : undefined);
+    out.locationMessage = {
+      degreesLatitude: readFloat64LE(sf.get(1)?.[0]),
+      degreesLongitude: readFloat64LE(sf.get(2)?.[0]),
+      name: asStr(sf.get(3)?.[0]),
+      address: asStr(sf.get(4)?.[0]),
+      url: asStr(sf.get(7)?.[0]),
+      isLive: sf.get(8)?.[0] === 1,
+      accuracyInMeters: n(9),
+      jpegThumbnail: asBytes(sf.get(16)?.[0]),
       contextInfo: decodeCtx(asBytes(sf.get(17)?.[0])),
     };
   }

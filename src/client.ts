@@ -88,6 +88,18 @@ import { jidDecode } from "./frame/jid";
 const S_WHATSAPP_NET = "@s.whatsapp.net";
 const ACKABLE = new Set(["message", "receipt", "notification", "call", "ack"]);
 
+/** vCard 3.0 mínimo pro `contactMessage`. `waid` (dígitos do telefone) faz o
+ *  WhatsApp reconhecer o cartão como uma conta e abrir a conversa ao tocar. */
+function makeVCard(name: string, phone?: string): string {
+  const lines = ["BEGIN:VCARD", "VERSION:3.0", `FN:${name}`, `N:${name};;;;`];
+  if (phone) {
+    const digits = phone.replace(/[^\d]/g, "");
+    lines.push(`TEL;type=CELL;type=VOICE;waid=${digits}:${phone.startsWith("+") ? phone : `+${digits}`}`);
+  }
+  lines.push("END:VCARD");
+  return lines.join("\n");
+}
+
 // Códigos de `<failure>` / `<stream:error>` que são definitivos — não adianta
 // reconectar (a sessão foi invalidada; precisa parear de novo).
 const LOGOUT_CODES = new Set(["401", "403", "405", "conflict", "device_removed"]);
@@ -149,6 +161,21 @@ export interface OniConnection {
   /** Álbum: um container + N mídias ligadas. `items` são `imageMessage`/
    *  `videoMessage` (use `buildImageMessage`/`buildVideoMessage`). */
   sendAlbum(jid: string, items: E2EMessage[], opts?: SendOptions): Promise<{ albumId: string; ids: string[] }>;
+  /** Cartão de contato. Passe `vcard` pronto, ou `phone`/`name` e a lib monta um
+   *  vCard 3.0 simples. Vários → `contactsArrayMessage`. */
+  sendContact(
+    jid: string,
+    contacts:
+      | { name: string; phone?: string; vcard?: string }
+      | Array<{ name: string; phone?: string; vcard?: string }>,
+    opts?: SendOptions,
+  ): Promise<{ id: string }>;
+  /** Pino de localização. */
+  sendLocation(
+    jid: string,
+    loc: { latitude: number; longitude: number; name?: string; address?: string; url?: string },
+    opts?: SendOptions,
+  ): Promise<{ id: string }>;
   /** Edita uma mensagem nossa já enviada (`key` = a original). Vira um
    *  `protocolMessage` MESSAGE_EDIT; o outro lado recebe `messages.update`. */
   editMessage(jid: string, key: MessageKey, newText: string): Promise<{ id: string }>;
@@ -1140,6 +1167,32 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     },
     sendMessage: (jid, msg, opts) => messages.sendMessage(jid, msg, opts ? { opts } : undefined),
     sendAlbum: (jid, items, opts) => messages.sendAlbum(jid, items, opts),
+    sendContact: (jid, contacts, opts) => {
+      const one = (ct: { name: string; phone?: string; vcard?: string }) => ({
+        displayName: ct.name,
+        vcard: ct.vcard ?? makeVCard(ct.name, ct.phone),
+      });
+      const list = Array.isArray(contacts) ? contacts : [contacts];
+      const msg: E2EMessage =
+        list.length === 1
+          ? { contactMessage: one(list[0]!) }
+          : { contactsArrayMessage: { displayName: list.map((c) => c.name).join(", "), contacts: list.map(one) } };
+      return messages.sendMessage(jid, msg, opts ? { opts } : undefined);
+    },
+    sendLocation: (jid, loc, opts) =>
+      messages.sendMessage(
+        jid,
+        {
+          locationMessage: {
+            degreesLatitude: loc.latitude,
+            degreesLongitude: loc.longitude,
+            name: loc.name,
+            address: loc.address,
+            url: loc.url,
+          },
+        },
+        opts ? { opts } : undefined,
+      ),
     editMessage: (jid, key, newText) => messages.editMessage(jid, key, newText),
     deleteMessage: (jid, key) => messages.deleteMessage(jid, key),
     sendPoll: (jid, name, options, selectableCount) =>
