@@ -23,6 +23,9 @@ import {
   type BinaryNode,
 } from "../frame/node";
 import { utf8Encode } from "../frame/buffer";
+import { imageDimensions, mp4Dimensions } from "./image-meta";
+
+export { imageDimensions, mp4Dimensions, type ImageSize } from "./image-meta";
 import type { E2EMessage } from "../proto/e2e-message";
 
 /** Subconjunto do `fetch` que a camada usa. `globalThis.fetch` satisfaz.
@@ -256,20 +259,31 @@ export function createMediaLayer(o: MediaLayerOptions): MediaLayer {
 
   async function buildImageMessage(data: Uint8Array, opts: ImageOptions = {}): Promise<E2EMessage> {
     const u = await encryptAndUpload("image", data);
+    // dimensões: usa as do chamador, senão lê do cabeçalho do arquivo.
+    const dim =
+      opts.width && opts.height ? { width: opts.width, height: opts.height } : imageDimensions(data);
+    // thumbnail: se não veio e a imagem É um JPEG pequeno, embute ela mesma —
+    // dá preview instantâneo sem decodificar/redimensionar (a oni não tem lib
+    // nativa de imagem). JPEG grande / outro formato → sem thumb (chamador põe).
+    const thumb =
+      opts.jpegThumbnail ??
+      (data.length <= 24576 && data[0] === 0xff && data[1] === 0xd8 ? data : undefined);
     return {
       imageMessage: {
         ...u,
         mimetype: opts.mimetype ?? "image/jpeg",
         caption: opts.caption,
-        width: opts.width,
-        height: opts.height,
-        jpegThumbnail: opts.jpegThumbnail,
+        width: dim?.width,
+        height: dim?.height,
+        jpegThumbnail: thumb,
       },
     };
   }
 
   async function buildVideoMessage(data: Uint8Array, opts: VideoOptions = {}): Promise<E2EMessage> {
     const u = await encryptAndUpload("video", data);
+    const dim =
+      opts.width && opts.height ? { width: opts.width, height: opts.height } : mp4Dimensions(data);
     return {
       videoMessage: {
         ...u,
@@ -277,8 +291,8 @@ export function createMediaLayer(o: MediaLayerOptions): MediaLayer {
         caption: opts.caption,
         seconds: opts.seconds,
         gifPlayback: opts.gifPlayback,
-        width: opts.width,
-        height: opts.height,
+        width: dim?.width,
+        height: dim?.height,
         jpegThumbnail: opts.jpegThumbnail,
       },
     };

@@ -3,7 +3,7 @@
 // `query` e o `fetch` são dublês que capturam o que a camada mandaria.
 
 import { crypto } from "../src/crypto";
-import { createMediaLayer, hasDownloadableMedia } from "../src/media";
+import { createMediaLayer, hasDownloadableMedia, imageDimensions, mp4Dimensions } from "../src/media";
 import { node, getBinaryNodeChild, type BinaryNode } from "../src/frame/node";
 import { encodeE2EMessage, decodeE2EMessage } from "../src/proto/e2e-message";
 import { utf8Encode } from "../src/frame/buffer";
@@ -241,6 +241,71 @@ function decryptBody(mediaKey: Uint8Array, info: string): Uint8Array {
   ok("sticker: mimetype webp / isAnimated", sm.mimetype === "image/webp" && sm.isAnimated === true);
   const smr = decodeE2EMessage(encodeE2EMessage({ stickerMessage: sm })).stickerMessage!;
   ok("sticker: codec roundtrip", smr.isAnimated === true && smr.width === 512 && eq(smr.mediaKey!, sm.mediaKey!));
+}
+
+// --- imageDimensions / mp4Dimensions: dimensões do cabeçalho ---------------
+{
+  const pad = (b: number[]) => Uint8Array.from(b.concat(Array(Math.max(0, 32 - b.length)).fill(0)));
+
+  // PNG: assinatura + IHDR + W(4 BE) + H(4 BE)
+  const png = pad([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0, 0, 0x03, 0x20, 0, 0, 0x02, 0x58,
+  ]);
+  ok("imageDimensions PNG 800x600", JSON.stringify(imageDimensions(png)) === '{"width":800,"height":600}');
+
+  // JPEG: SOI + SOF0(len 17, prec 8, H, W)
+  const jpg = pad([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x01, 0x2c, 0x02, 0x00]); // 300 x 512
+  ok("imageDimensions JPEG 512x300", JSON.stringify(imageDimensions(jpg)) === '{"width":512,"height":300}');
+
+  // GIF: "GIF89a" + W(2 LE) + H(2 LE)
+  const gif = pad([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x40, 0x01, 0xf0, 0x00]); // 320 x 240
+  ok("imageDimensions GIF 320x240", JSON.stringify(imageDimensions(gif)) === '{"width":320,"height":240}');
+
+  ok("imageDimensions lixo → undefined", imageDimensions(C.randomBytes(40)) === undefined);
+  ok("imageDimensions curto → undefined", imageDimensions(Uint8Array.from([1, 2, 3])) === undefined);
+
+  // MP4: moov > trak > tkhd (v0) com width/height 16.16 fixed
+  const box = (type: string, payload: number[]) => {
+    const size = 8 + payload.length;
+    return [size >>> 24, (size >>> 16) & 255, (size >>> 8) & 255, size & 255,
+      ...type.split("").map((c) => c.charCodeAt(0)), ...payload];
+  };
+  const u32 = (n: number) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+  const tkhdPayload = [
+    0, 0, 0, 0, // version 0 + flags
+    ...Array(20).fill(0), // creation, mod, trackID, reserved, duration
+    ...Array(8).fill(0), // reserved
+    ...Array(8).fill(0), // layer, altgroup, volume, reserved
+    ...Array(36).fill(0), // matrix
+    ...u32(1280 << 16), // width  16.16
+    ...u32(720 << 16), // height 16.16
+  ];
+  const mp4 = Uint8Array.from(box("moov", box("trak", box("tkhd", tkhdPayload))));
+  ok("mp4Dimensions 1280x720", JSON.stringify(mp4Dimensions(mp4)) === '{"width":1280,"height":720}');
+  ok("mp4Dimensions não-mp4 → undefined", mp4Dimensions(png) === undefined);
+}
+
+// --- buildImageMessage: preenche dimensões e thumb sozinho ----------------
+{
+  const media = createMediaLayer({ crypto: C, query, fetch: fetchOk });
+
+  // JPEG "real" pequeno (SOF0 diz 40x30) → dimensões lidas + ele mesmo vira thumb
+  const smallJpeg = Uint8Array.from([
+    0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x1e, 0x00, 0x28,
+    ...Array(40).fill(0x20), 0xff, 0xd9,
+  ]);
+  const im = (await media.buildImageMessage(smallJpeg)).imageMessage!;
+  ok("buildImage: dimensões lidas do JPEG", im.width === 40 && im.height === 30);
+  ok("buildImage: JPEG pequeno vira jpegThumbnail", !!im.jpegThumbnail && eq(im.jpegThumbnail, smallJpeg));
+
+  // chamador manda width/height → não sobrescreve
+  const im2 = (await media.buildImageMessage(smallJpeg, { width: 999, height: 111 })).imageMessage!;
+  ok("buildImage: dimensões do chamador vencem", im2.width === 999 && im2.height === 111);
+
+  // blob grande não-JPEG → sem thumb, sem dimensões
+  const im3 = (await media.buildImageMessage(C.randomBytes(50000))).imageMessage!;
+  ok("buildImage: blob grande não-JPEG sem thumb", im3.jpegThumbnail === undefined);
 }
 
 // --- downloadMedia: baixa + decifra + verifica -----------------------

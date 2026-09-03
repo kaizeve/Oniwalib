@@ -83,6 +83,10 @@ export {
   type StickerOptions,
   type DownloadedMedia,
   type FetchLike,
+  hasDownloadableMedia,
+  imageDimensions,
+  mp4Dimensions,
+  type ImageSize,
 } from "./media";
 export {
   createProfileLayer,
