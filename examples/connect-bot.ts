@@ -404,6 +404,33 @@ bot.register("grupo", "mostra infos do grupo", async (_args, msg) => {
     .join("\n");
 });
 
+bot.register("block", "bloqueia um número (!block <número> — ou responde/roda numa DM)", async (args, msg) => {
+  const alvo = toJids(args)[0] ?? (isPerson(msg.from) ? msg.from : undefined);
+  if (!alvo) return "uso: !block <número>";
+  await conn.updateBlockStatus(alvo, "block");
+  return `🚫 ${alvo.split("@")[0]} bloqueado.`;
+});
+bot.register("unblock", "desbloqueia um número (!unblock <número>)", async (args, msg) => {
+  const alvo = toJids(args)[0] ?? (isPerson(msg.from) ? msg.from : undefined);
+  if (!alvo) return "uso: !unblock <número>";
+  await conn.updateBlockStatus(alvo, "unblock");
+  return `✅ ${alvo.split("@")[0]} desbloqueado.`;
+});
+bot.register("bloqueados", "lista os números bloqueados", async () => {
+  const l = await conn.fetchBlocklist();
+  return l.length ? l.map((j) => "• " + j.split("@")[0]).join("\n") : "ninguém bloqueado.";
+});
+
+// Recusa chamadas automaticamente (ligue com ONI_REJECT_CALLS=1).
+const rejectCalls = process.env.ONI_REJECT_CALLS === "1";
+conn.events.on("call", (calls) => {
+  for (const c of calls) {
+    if (c.status !== "offer") continue;
+    console.log(`📞 chamada ${c.isVideo ? "de vídeo " : ""}de ${c.from}${rejectCalls ? " — recusando" : ""}`);
+    if (rejectCalls) conn.rejectCall(c.id, c.chatId);
+  }
+});
+
 conn.events.on("connection.update", (u) => {
   if (u.qr) {
     console.log("\nescaneie (WhatsApp > Aparelhos conectados > Conectar um aparelho):\n");

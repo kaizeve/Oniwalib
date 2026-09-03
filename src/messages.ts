@@ -85,8 +85,18 @@ export interface MessagesLayerOptions {
 export interface MessagesLayer {
   handleMessageStanza(stanza: BinaryNode): Promise<void>;
   sendText(jid: string, text: string): Promise<{ id: string }>;
-  /** Cifra e envia um `Message` qualquer (texto, botões, lista, …). */
-  sendMessage(jid: string, msg: E2EMessage): Promise<{ id: string }>;
+  /** Cifra e envia um `Message` qualquer (texto, botões, lista, …). `extra.id`
+   *  força o id do `<message>`; `extra.editAttr` põe `edit="1"` (edição). */
+  sendMessage(
+    jid: string,
+    msg: E2EMessage,
+    extra?: { id?: string; editAttr?: boolean },
+  ): Promise<{ id: string }>;
+  /** Edita uma mensagem já enviada (só as nossas). `key` é a mensagem original;
+   *  `newText` o novo texto. Vira um `protocolMessage` MESSAGE_EDIT (type 14). */
+  editMessage(jid: string, key: MessageKey, newText: string): Promise<{ id: string }>;
+  /** Apaga uma mensagem para todos (revoke). `key` é a mensagem a apagar. */
+  deleteMessage(jid: string, key: MessageKey): Promise<{ id: string }>;
   /** Garante que há sessão pairwise com cada `jid` (com device): para os que
    *  faltam, busca o bundle (`<iq xmlns="encrypt">`) e roda o X3DH. Precisa de
    *  `query`. Devolve os jids que ficaram SEM sessão (device fora do ar etc.). */
@@ -433,6 +443,25 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
         return msg;
       }
 
+      // Edição de mensagem (protocolMessage MESSAGE_EDIT, type 14).
+      if (
+        msg.protocolMessage &&
+        msg.protocolMessage.type === 14 &&
+        msg.protocolMessage.key &&
+        msg.protocolMessage.editedMessage
+      ) {
+        events.emit("messages.update", [
+          {
+            key: toMsgKey(msg.protocolMessage.key, chatId),
+            update: {
+              message: msg.protocolMessage.editedMessage,
+              editedTimestamp: msg.protocolMessage.timestampMs,
+            },
+          },
+        ]);
+        return msg;
+      }
+
       const bareSkdm =
         !!msg.senderKeyDistributionMessage &&
         !msg.conversation &&
@@ -594,8 +623,12 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     return stillMissing;
   }
 
-  async function sendMessage(jid: string, msg: E2EMessage): Promise<{ id: string }> {
-    if (isJidGroup(jid)) return sendGroupMessage(jid, msg);
+  async function sendMessage(
+    jid: string,
+    msg: E2EMessage,
+    extra?: { id?: string; editAttr?: boolean },
+  ): Promise<{ id: string }> {
+    if (isJidGroup(jid)) return sendGroupMessage(jid, msg, extra);
 
     const addr = signalAddress(jid);
     const pre = await deps.storage.loadSession(addr);
@@ -627,9 +660,49 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
         );
       }
 
-      const id = genId();
-      sendNode(node("message", { id, to: jid, type: "text" }, content));
+      const id = extra?.id ?? genId();
+      const mAttrs: Record<string, string> = { id, to: jid, type: "text" };
+      if (extra?.editAttr) mAttrs.edit = "1";
+      sendNode(node("message", mAttrs, content));
       return { id };
+    });
+  }
+
+  async function editMessage(
+    jid: string,
+    key: MessageKey,
+    newText: string,
+  ): Promise<{ id: string }> {
+    return sendMessage(
+      jid,
+      {
+        protocolMessage: {
+          key: {
+            remoteJid: key.remoteJid,
+            fromMe: key.fromMe,
+            id: key.id,
+            participant: key.participant,
+          },
+          type: 14, // MESSAGE_EDIT
+          editedMessage: { conversation: newText },
+          timestampMs: Date.now(),
+        },
+      },
+      { id: key.id, editAttr: true },
+    );
+  }
+
+  async function deleteMessage(jid: string, key: MessageKey): Promise<{ id: string }> {
+    return sendMessage(jid, {
+      protocolMessage: {
+        key: {
+          remoteJid: key.remoteJid,
+          fromMe: key.fromMe,
+          id: key.id,
+          participant: key.participant,
+        },
+        type: 0, // REVOKE
+      },
     });
   }
 
@@ -643,7 +716,11 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
   //   </message>
   // Quem ainda não recebeu o nosso SKDM não decifra até (re)aparecer — mesma
   // limitação que a leitura de grupo tem hoje.
-  async function sendGroupMessage(groupJid: string, msg: E2EMessage): Promise<{ id: string }> {
+  async function sendGroupMessage(
+    groupJid: string,
+    msg: E2EMessage,
+    extra?: { id?: string; editAttr?: boolean },
+  ): Promise<{ id: string }> {
     // FORA do `serial`: se há resolvedor de devices do grupo (client.ts —
     // metadata + USYNC, com cache), abre sessão com todo device de todo membro
     // antes de fanar o SKDM. Sem isso, só alcança quem já tem sessão pairwise.
@@ -727,9 +804,10 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
         );
       }
 
-      const id = genId();
+      const id = extra?.id ?? genId();
       const attrs: Record<string, string> = { id, to: groupJid, type: "text" };
       if (addressingMode) attrs.addressing_mode = addressingMode;
+      if (extra?.editAttr) attrs.edit = "1";
       sendNode(node("message", attrs, content));
       return { id };
     });
@@ -938,6 +1016,8 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     handleMessageStanza,
     sendText,
     sendMessage,
+    editMessage,
+    deleteMessage,
     assertSessions,
     sendStatus,
     sendReaction,

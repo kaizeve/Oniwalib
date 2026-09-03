@@ -82,6 +82,11 @@ export interface E2EProtocolMessage {
    *  entrega as chaves-mestras do app-state sync por aqui. Cada entrada:
    *  `keyId` (id da chave) + `keyData` (32 bytes de material). */
   appStateSyncKeyShare?: Array<{ keyId: Uint8Array; keyData: Uint8Array; timestamp?: number }>;
+  /** ProtocolMessage.editedMessage (campo 14) — o novo conteúdo, quando
+   *  `type === 14` (MESSAGE_EDIT). */
+  editedMessage?: E2EMessage;
+  /** ProtocolMessage.timestampMs (campo 15) — quando a edição/ação ocorreu. */
+  timestampMs?: number;
 }
 
 /**
@@ -511,6 +516,8 @@ export function encodeE2EMessage(m: E2EMessage): Uint8Array {
     const sub = new Writer();
     if (p.key) sub.message(1, messageKeyWriter(p.key));
     sub.uint(2, p.type ?? 0); // REVOKE(0) não é escrito — decode trata ausência como 0
+    if (p.editedMessage) sub.bytes(14, encodeE2EMessage(p.editedMessage));
+    if (p.timestampMs) sub.uint(15, p.timestampMs);
     w.message(12, sub);
   }
   return w.finish();
@@ -799,6 +806,10 @@ export function decodeE2EMessage(bytes: Uint8Array): E2EMessage {
       key: decodeMessageKey(asBytes(sf.get(1)?.[0])),
       type: typeof ty === "number" ? ty : 0,
     };
+    const edited = asBytes(sf.get(14)?.[0]);
+    if (edited) out.protocolMessage.editedMessage = decodeE2EMessage(edited);
+    const tsMs = sf.get(15)?.[0];
+    if (typeof tsMs === "number") out.protocolMessage.timestampMs = tsMs;
     // appStateSyncKeyShare (campo 7): { repeated AppStateSyncKey keys = 1 }
     const share = asBytes(sf.get(7)?.[0]);
     if (share) {

@@ -145,6 +145,18 @@ export {
   type AppStateLayer,
   type AppStateLayerOptions,
 } from "./appstate/layer";
+export {
+  createCallsLayer,
+  extractCall,
+  type CallsLayer,
+  type CallsLayerOptions,
+} from "./calls";
+export {
+  createBlocklistLayer,
+  parseBlocklist,
+  type BlocklistLayer,
+  type BlocklistLayerOptions,
+} from "./blocklist";
 
 export {
   createChannelsLayer,
@@ -236,6 +248,7 @@ export {
   type WAPresence,
   type PresenceData,
   type ContactUpdate,
+  type WACall,
 } from "./events/emitter";
 export {
   STOCK,

@@ -27,6 +27,8 @@ import {
 import { createProfileLayer, type ProfileLayer } from "./profile";
 import { createAppStateLayer, type AppStateLayer } from "./appstate/layer";
 import type { ChatModification, WAPatchName } from "./appstate";
+import { createCallsLayer, type CallsLayer } from "./calls";
+import { createBlocklistLayer, type BlocklistLayer } from "./blocklist";
 import {
   createPrivacyLayer,
   type PrivacyLayer,
@@ -123,6 +125,11 @@ export interface OniConnection {
   sendText(jid: string, text: string): Promise<{ id: string }>;
   /** Como `sendText`, mas com um `Message` inteiro — botões, lista, viewOnce… */
   sendMessage(jid: string, msg: E2EMessage): Promise<{ id: string }>;
+  /** Edita uma mensagem nossa já enviada (`key` = a original). Vira um
+   *  `protocolMessage` MESSAGE_EDIT; o outro lado recebe `messages.update`. */
+  editMessage(jid: string, key: MessageKey, newText: string): Promise<{ id: string }>;
+  /** Apaga uma mensagem para todos (revoke). */
+  deleteMessage(jid: string, key: MessageKey): Promise<{ id: string }>;
   /** Abre sessão Signal com `jids` que ainda não têm uma (busca o bundle de
    *  pré-chaves e roda o X3DH). `sendText`/`sendMessage` 1:1 já chamam isto
    *  sozinhos; use direto para pré-aquecer. Devolve os jids que ficaram sem
@@ -262,6 +269,12 @@ export interface OniConnection {
   chatModify(mod: ChatModification, jid: string): Promise<void>;
   /** `true` se já recebemos as chaves-mestras de app-state do device primário. */
   appStateReady(): boolean;
+  /** Lista de jids bloqueados (também emite `blocklist.update`). */
+  fetchBlocklist(): Promise<string[]>;
+  /** Bloqueia/desbloqueia um número. */
+  updateBlockStatus(jid: string, action: "block" | "unblock"): Promise<void>;
+  /** Recusa uma chamada recebida (do evento `call`: `rejectCall(c.id, c.chatId)`). */
+  rejectCall(callId: string, callFrom: string): void;
   /** Fecha e não reconecta. */
   end(err?: Error): void;
   readonly state: "connecting" | "open" | "close";
@@ -505,6 +518,10 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     meId: () => auth.creds.me?.id,
   });
   const notifications: NotificationsLayer = createNotificationsLayer({ events });
+
+  // Chamadas (só notifica + recusa; sem WebRTC) e blocklist da conta.
+  const calls: CallsLayer = createCallsLayer({ events, sendNode: send });
+  const blocklist: BlocklistLayer = createBlocklistLayer({ query, events });
 
   // Recibos de leitura (tick azul) e afins. `<receipt to=jid type=read
   // id=id0 [participant=...]>` + `<list><item id=.../></list>` para os demais
@@ -791,12 +808,25 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
           } catch {
             /* notificação de grupo malformada — só ackeia */
           }
+        } else if (n.attrs.type === "blocklist") {
+          try {
+            blocklist.handleBlocklistNotification(n);
+          } catch {
+            /* malformada — só ackeia */
+          }
         } else {
           try {
             notifications.handleNotification(n);
           } catch {
             /* notificação malformada — só ackeia */
           }
+        }
+        return sendAck(n);
+      case "call":
+        try {
+          calls.handleCallNode(n);
+        } catch {
+          /* <call> malformado — só ackeia */
         }
         return sendAck(n);
       // Presença não leva <ack>.
@@ -893,6 +923,8 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     sendNode: send,
     sendText: (jid, text) => messages.sendText(jid, text),
     sendMessage: (jid, msg) => messages.sendMessage(jid, msg),
+    editMessage: (jid, key, newText) => messages.editMessage(jid, key, newText),
+    deleteMessage: (jid, key) => messages.deleteMessage(jid, key),
     assertSessions: (jids) => messages.assertSessions(jids),
     sendAudio: async (jid, data, o2) => messages.sendMessage(jid, await media.buildAudioMessage(data, o2)),
     sendImage: async (jid, data, o2) => messages.sendMessage(jid, await media.buildImageMessage(data, o2)),
@@ -906,6 +938,9 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     updateProfileName: (name) => appstate.updateProfileName(name),
     chatModify: (mod, jid) => appstate.chatModify(mod, jid),
     appStateReady: () => appstate.hasKeys(),
+    fetchBlocklist: () => blocklist.fetchBlocklist(),
+    updateBlockStatus: (jid, action) => blocklist.updateBlockStatus(jid, action),
+    rejectCall: (callId, callFrom) => calls.rejectCall(callId, callFrom),
     postStatus: async (recipients, content) => {
       let msg: E2EMessage;
       if ("text" in content) {

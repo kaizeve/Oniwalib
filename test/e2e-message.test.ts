@@ -216,6 +216,30 @@ ok("conversation vira 0a026f69", hex(encodeE2EMessage({ conversation: "oi" })) =
   ok("reactionMessage round-trip", back.reactionMessage?.text === "🔥");
 }
 
+// protocolMessage (campo 12): REVOKE, MESSAGE_EDIT, appStateSyncKeyShare
+{
+  const revoke = decodeE2EMessage(
+    encodeE2EMessage({
+      protocolMessage: { key: { id: "m1", remoteJid: "a@s.whatsapp.net", fromMe: true }, type: 0 },
+    }),
+  );
+  ok("protocolMessage REVOKE round-trip (type 0)", (revoke.protocolMessage?.type ?? 0) === 0 && revoke.protocolMessage?.key?.id === "m1");
+
+  const edit = decodeE2EMessage(
+    encodeE2EMessage({
+      protocolMessage: {
+        key: { id: "m2", remoteJid: "a@s.whatsapp.net", fromMe: true },
+        type: 14,
+        editedMessage: { conversation: "novo texto" },
+        timestampMs: 1700000000123,
+      },
+    }),
+  );
+  ok("protocolMessage MESSAGE_EDIT type 14", edit.protocolMessage?.type === 14);
+  ok("protocolMessage editedMessage aninhado", edit.protocolMessage?.editedMessage?.conversation === "novo texto");
+  ok("protocolMessage timestampMs", edit.protocolMessage?.timestampMs === 1700000000123);
+}
+
 const rt =
   typeof (globalThis as any).Bun !== "undefined"
     ? "bun"

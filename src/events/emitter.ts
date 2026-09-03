@@ -38,6 +38,12 @@ export interface OniwalibEvents {
   };
   /** "Apagar para todos" (protocolMessage REVOKE). */
   "messages.delete": { keys: MessageKey[] };
+  /** Mensagem alterada — edição (protocolMessage MESSAGE_EDIT), estrela, etc.
+   *  `update.message` traz o novo conteúdo quando é edição. */
+  "messages.update": Array<{
+    key: MessageKey;
+    update: { message?: unknown; editedTimestamp?: number; starred?: boolean };
+  }>;
   /** Presença de um contato/participante mudou (online, digitando, gravando…). */
   "presence.update": { id: string; presences: Record<string, PresenceData> };
   /** Mudou foto de perfil, recado (bio/about) ou nome de um contato. */
@@ -57,8 +63,27 @@ export interface OniwalibEvents {
     participants: string[];
     action: "add" | "remove" | "promote" | "demote" | "modify";
   };
+  /** Uma chamada (voz/vídeo) — oferta, aceite, ou fim. */
+  "call": WACall[];
+  /** A blocklist da conta mudou. `action` ausente = lista completa (no fetch
+   *  inicial ou num `<notification type="blocklist">` de dump). */
+  "blocklist.update": { blocklist: string[]; action?: "add" | "remove" };
   "node.recv": BinaryNode;
   "node.send": BinaryNode;
+}
+
+export interface WACall {
+  chatId: string;
+  from: string;
+  id: string;
+  /** `offer` chegou uma chamada · `accept`/`reject`/`timeout`/`terminate` fim. */
+  status: "offer" | "ringing" | "accept" | "reject" | "timeout" | "terminate";
+  date: Date;
+  isVideo?: boolean;
+  isGroup?: boolean;
+  groupJid?: string;
+  /** Quem originou (em grupo pode diferir de `from`). */
+  offline?: boolean;
 }
 
 export interface MessageKey {

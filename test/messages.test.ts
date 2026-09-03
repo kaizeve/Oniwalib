@@ -158,6 +158,38 @@ await layer.sendMessage(USER_JID, {
   ok("sendMessage cifra buttonsMessage", clear.buttonsMessage?.buttons?.[0]?.buttonId === "!ping");
 }
 
+// --- editMessage: protocolMessage MESSAGE_EDIT + edit="1" ---
+sent.length = 0;
+{
+  const origKey = { remoteJid: USER_JID, fromMe: true, id: "BOT_MSG_1" };
+  await layer.editMessage(USER_JID, origKey, "texto corrigido");
+  const m = sent.find((n) => n.tag === "message");
+  ok("editMessage: <message edit=1>", m?.attrs.edit === "1");
+  ok("editMessage: id = id da original", m?.attrs.id === "BOT_MSG_1");
+  const enc = getBinaryNodeChild(m, "enc");
+  const clear = decodeE2EMessage(
+    unpad(await decryptWhisperMessage(userDeps, "bot.0", enc!.content as Uint8Array)),
+  );
+  ok("editMessage: protocolMessage type 14", clear.protocolMessage?.type === 14);
+  ok("editMessage: key aponta pra original", clear.protocolMessage?.key?.id === "BOT_MSG_1");
+  ok("editMessage: editedMessage tem o novo texto", clear.protocolMessage?.editedMessage?.conversation === "texto corrigido");
+  ok("editMessage: timestampMs presente", typeof clear.protocolMessage?.timestampMs === "number");
+}
+
+// --- deleteMessage: protocolMessage REVOKE ---
+sent.length = 0;
+{
+  await layer.deleteMessage(USER_JID, { remoteJid: USER_JID, fromMe: true, id: "BOT_MSG_2" });
+  const m = sent.find((n) => n.tag === "message");
+  ok("deleteMessage: sem edit attr", m?.attrs.edit === undefined);
+  const enc = getBinaryNodeChild(m, "enc");
+  const clear = decodeE2EMessage(
+    unpad(await decryptWhisperMessage(userDeps, "bot.0", enc!.content as Uint8Array)),
+  );
+  ok("deleteMessage: protocolMessage type 0 (REVOKE)", (clear.protocolMessage?.type ?? 0) === 0);
+  ok("deleteMessage: key da mensagem a apagar", clear.protocolMessage?.key?.id === "BOT_MSG_2");
+}
+
 // sendText sem sessão → erro claro
 {
   let threw = "";
