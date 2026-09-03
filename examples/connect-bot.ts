@@ -513,7 +513,9 @@ conn.events.on("messages.upsert", ({ messages }) => {
       for (const r of Array.isArray(reply) ? reply : [reply]) {
         const t0 = Date.now();
         try {
-          if (typeof r === "string") await conn.sendText(from, r);
+          if (typeof r === "string")
+            // se a resposta tem um link, manda com card de preview
+            await conn.sendText(from, r, /https?:\/\//.test(r) ? { linkPreview: true } : undefined);
           else await conn.sendMessage(from, r);
           const kind =
             typeof r === "string"

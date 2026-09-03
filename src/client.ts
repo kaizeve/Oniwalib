@@ -68,6 +68,7 @@ import {
 import { createPresenceLayer, type PresenceLayer } from "./presence";
 import { createNotificationsLayer, type NotificationsLayer } from "./notifications";
 import type { E2EMessage } from "./proto/e2e-message";
+import { fetchLinkPreview } from "./link-preview";
 import { crypto as defaultCrypto } from "./crypto";
 import type { Crypto } from "./crypto/types";
 import type { AuthenticationState } from "./auth/state";
@@ -612,11 +613,8 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
 
   // Camada de mídia: cifra + sobe o anexo (HTTP) e devolve o `Message` pronto,
   // que segue pelo mesmo `messages.sendMessage` (1:1 ou grupo).
-  const media: MediaLayer = createMediaLayer({
-    crypto: c,
-    query,
-    fetch: opts.fetch ?? (globalThis as { fetch?: FetchLike }).fetch,
-  });
+  const httpFetch = opts.fetch ?? (globalThis as { fetch?: FetchLike }).fetch;
+  const media: MediaLayer = createMediaLayer({ crypto: c, query, fetch: httpFetch });
 
   // App-state sync (LT-hash): push name, mute/pin/archive, roster de contatos.
   // O blob externo de snapshot/patch usa o mesmo esquema de download da mídia.
@@ -1126,7 +1124,20 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
   return {
     events,
     sendNode: send,
-    sendText: (jid, text, opts) => messages.sendText(jid, text, opts),
+    sendText: async (jid, text, opts) => {
+      if (opts?.linkPreview) {
+        const preview = await fetchLinkPreview(text, httpFetch);
+        if (preview) {
+          const { linkPreview: _lp, ...rest } = opts;
+          return messages.sendMessage(
+            jid,
+            { extendedTextMessage: { text, ...preview } },
+            Object.keys(rest).length ? { opts: rest } : undefined,
+          );
+        }
+      }
+      return messages.sendText(jid, text, opts);
+    },
     sendMessage: (jid, msg, opts) => messages.sendMessage(jid, msg, opts ? { opts } : undefined),
     sendAlbum: (jid, items, opts) => messages.sendAlbum(jid, items, opts),
     editMessage: (jid, key, newText) => messages.editMessage(jid, key, newText),

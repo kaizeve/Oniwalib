@@ -98,6 +98,10 @@ export interface SendOptions {
   ephemeralExpiration?: number;
   /** Marca como encaminhada. */
   forwarded?: boolean;
+  /** `sendText`: busca a 1ª URL do texto e anexa um card de preview
+   *  (`extendedTextMessage` com título/descrição). Sem imagem. Precisa de
+   *  `fetch` no `openWhatsApp`. É tratado no `client.ts`. */
+  linkPreview?: boolean;
 }
 
 export interface MessagesLayer {

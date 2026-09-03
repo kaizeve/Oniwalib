@@ -88,6 +88,7 @@ export {
   mp4Dimensions,
   type ImageSize,
 } from "./media";
+export { fetchLinkPreview, firstUrl, type LinkPreview } from "./link-preview";
 export {
   createProfileLayer,
   type ProfileLayer,

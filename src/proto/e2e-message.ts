@@ -237,7 +237,17 @@ export interface E2EContextInfo {
 
 export interface E2EMessage {
   conversation?: string;
-  extendedTextMessage?: { text?: string; contextInfo?: E2EContextInfo };
+  extendedTextMessage?: {
+    text?: string;
+    /** Preview de link (o card acima do texto). `matchedText` é a URL que casou. */
+    matchedText?: string;
+    canonicalUrl?: string;
+    description?: string;
+    title?: string;
+    /** 0 = NONE, 1 = VIDEO. */
+    previewType?: number;
+    contextInfo?: E2EContextInfo;
+  };
   audioMessage?: E2EAudioMessage;
   imageMessage?: E2EImageMessage;
   videoMessage?: E2EVideoMessage;
@@ -437,8 +447,14 @@ export function encodeE2EMessage(m: E2EMessage): Uint8Array {
   const w = new Writer();
   if (m.conversation !== undefined) w.string(1, m.conversation);
   if (m.extendedTextMessage) {
-    const sub = new Writer().string(1, m.extendedTextMessage.text);
-    const ctx = ctxWriter(m.extendedTextMessage.contextInfo);
+    const e = m.extendedTextMessage;
+    const sub = new Writer().string(1, e.text);
+    sub.string(2, e.matchedText);
+    sub.string(4, e.canonicalUrl);
+    sub.string(5, e.description);
+    sub.string(6, e.title);
+    if (e.previewType) sub.uint(10, e.previewType);
+    const ctx = ctxWriter(e.contextInfo);
     if (ctx) sub.message(17, ctx);
     w.message(6, sub);
   }
@@ -700,7 +716,15 @@ export function decodeE2EMessage(bytes: Uint8Array): E2EMessage {
   const ext = asBytes(f.get(6)?.[0]);
   if (ext) {
     const sf = new Reader(ext).fields();
-    out.extendedTextMessage = { text: asStr(sf.get(1)?.[0]), contextInfo: decodeCtx(asBytes(sf.get(17)?.[0])) };
+    out.extendedTextMessage = {
+      text: asStr(sf.get(1)?.[0]),
+      matchedText: asStr(sf.get(2)?.[0]) || undefined,
+      canonicalUrl: asStr(sf.get(4)?.[0]) || undefined,
+      description: asStr(sf.get(5)?.[0]) || undefined,
+      title: asStr(sf.get(6)?.[0]) || undefined,
+      previewType: typeof sf.get(10)?.[0] === "number" ? (sf.get(10)![0] as number) : undefined,
+      contextInfo: decodeCtx(asBytes(sf.get(17)?.[0])),
+    };
   }
 
   const aud = asBytes(f.get(8)?.[0]);
