@@ -985,11 +985,10 @@ export function decodeE2EMessage(bytes: Uint8Array): E2EMessage {
   const alb = asBytes(f.get(83)?.[0]);
   if (alb) {
     const sf = new Reader(alb).fields();
-    const ic = sf.get(2)?.[0];
-    const vc = sf.get(3)?.[0];
+    const n = (k: number) => (typeof sf.get(k)?.[0] === "number" ? (sf.get(k)![0] as number) : undefined);
     out.albumMessage = {
-      expectedImageCount: typeof ic === "number" ? ic : undefined,
-      expectedVideoCount: typeof vc === "number" ? vc : undefined,
+      expectedImageCount: n(2),
+      expectedVideoCount: n(3),
       contextInfo: decodeCtx(asBytes(sf.get(17)?.[0])),
     };
   }

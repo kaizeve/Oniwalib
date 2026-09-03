@@ -16,7 +16,7 @@ It talks the socket directly — no browser, no Puppeteer, no headless Chrome.
 [![license](https://img.shields.io/badge/license-restricted-c92a2a?style=flat-square)](LICENSE)
 [![channel](https://img.shields.io/badge/WhatsApp-official%20channel-25D366?style=flat-square&logo=whatsapp&logoColor=white)](https://whatsapp.com/channel/0029Vb93Ug3LI8YRuoroJd44)
 
-<sub>working name · progress tracked separately from the RTS core · meet **Oni**, the mascot 👹 (a demon — but a friendly one)</sub>
+<sub>**OniWaLib** · `v0.1.0` · progress tracked separately from the RTS core · meet **Oni**, the mascot 👹 (a demon — but a friendly one)</sub>
 
 <sub>Official channel: **[whatsapp.com/channel/0029Vb93Ug3LI8YRuoroJd44](https://whatsapp.com/channel/0029Vb93Ug3LI8YRuoroJd44)** — releases, API changes, breaking-change notices.</sub>
 
@@ -229,6 +229,8 @@ const { version, source } = await resolveOniVersion();   // e.g. [2, 3000, 10232
 > building and inspecting messages, and running the handshake against a
 > reference adapter.
 
+**Full method + event reference: [`docs/API.md`](docs/API.md).**
+
 ### Build a message with buttons
 
 ```ts
@@ -342,6 +344,8 @@ await sock.connect();
 oniwalib/
 ├── assets/
 │   └── oni-banner.png        the mascot
+├── docs/
+│   └── API.md                method + event reference
 ├── src/
 │   ├── frame/                WABinary codec
 │   │   ├── constants.ts        tags + token tables (PROVENANCE: to verify)
