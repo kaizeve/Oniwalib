@@ -381,6 +381,47 @@ upserts.length = 0;
   ok("envio grupo: usuário decifra a 2ª (mesma cadeia)", clearG2.conversation === "segunda");
 }
 
+// --- RECEBER STATUS (status@broadcast) — mesma via skmsg do grupo -----
+sent.length = 0;
+upserts.length = 0;
+{
+  const STATUS = "status@broadcast";
+  const posterRec = new SenderKeyRecord();
+  const skdmBytes = createSenderKeyDistribution(C, posterRec);
+
+  // 1) o "poster" manda o SKDM 1:1 pro bot, com groupId = status@broadcast
+  const skdmMsg = encodeE2EMessage({
+    senderKeyDistributionMessage: { groupId: STATUS, axolotlSenderKeyDistributionMessage: skdmBytes },
+  });
+  const p = new Uint8Array(skdmMsg.length + 5);
+  p.set(skdmMsg);
+  p.fill(5, skdmMsg.length);
+  const skdmEnc = await sigEncrypt(userDeps, "bot.0", p);
+  await layer.handleMessageStanza(
+    node("message", { from: USER_JID, id: "st-skdm", t: "1700000020" }, [
+      node("enc", { v: "2", type: skdmEnc.type === 3 ? "pkmsg" : "msg" }, skdmEnc.body),
+    ]),
+  );
+
+  // 2) o status em si: <message from="status@broadcast" participant=poster><enc skmsg>
+  const stPlain = encodeE2EMessage({ imageMessage: { caption: "meu status", mediaKey: new Uint8Array(32) } });
+  const sp = new Uint8Array(stPlain.length + 7);
+  sp.set(stPlain);
+  sp.fill(7, stPlain.length);
+  const stCipher = groupEncrypt(C, posterRec, sp);
+  await layer.handleMessageStanza(
+    node("message", { from: STATUS, participant: USER_JID, id: "st1", t: "1700000021", type: "media" }, [
+      node("enc", { v: "2", type: "skmsg" }, stCipher),
+    ]),
+  );
+
+  const up = upserts.find((u) => u.messages?.[0]?.key?.id === "st1");
+  ok("status: emitiu upsert", !!up);
+  ok("status: key.remoteJid = status@broadcast", up?.messages?.[0]?.key?.remoteJid === STATUS);
+  ok("status: key.participant = quem postou", up?.messages?.[0]?.key?.participant === USER_JID);
+  ok("status: conteúdo decifrado", (up?.messages?.[0]?.message as any)?.imageMessage?.caption === "meu status");
+}
+
 // --- cold-send: sem sessão + query → busca bundle, abre X3DH, manda pkmsg ---
 {
   const coldAuth = memoryAuthState();

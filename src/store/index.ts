@@ -57,9 +57,19 @@ export interface InMemoryStore {
   labels: Map<string, { name?: string; color?: number; deleted?: boolean }>;
   /** jid do chat → conjunto de labelIds. */
   chatLabels: Map<string, Set<string>>;
+  /** id da mensagem da enquete → (jid do eleitor → último voto CIFRADO). */
+  pollVotes: Map<string, Map<string, { encPayload?: Uint8Array; encIv?: Uint8Array; ts?: number }>>;
 
   /** Assina os eventos de uma conexão. Devolve uma função pra desassinar. */
   bind(events: Emitter): () => void;
+  /** Placar de uma enquete a partir dos votos guardados. `decryptVote` recebe
+   *  o jid do eleitor e o voto cifrado e devolve os NOMES de opção escolhidos
+   *  (use `readPollVote` / `decryptPollVote` de `src/polls`). Votos que não
+   *  decifram são ignorados. */
+  pollResults(
+    pollMsgId: string,
+    decryptVote: (voterJid: string, vote: { encPayload?: Uint8Array; encIv?: Uint8Array }) => string[] | undefined,
+  ): { tally: Record<string, number>; voters: number };
   /** Última mensagem conhecida de um chat com aquele id. */
   loadMessage(jid: string, id: string): StoreMessage | undefined;
   /** As `n` mensagens mais recentes de um chat (ordem crescente de tempo). */
@@ -100,6 +110,10 @@ export function makeInMemoryStore(): InMemoryStore {
   const groupMetadata = new Map<string, GroupMetadata>();
   const labels = new Map<string, { name?: string; color?: number; deleted?: boolean }>();
   const chatLabels = new Map<string, Set<string>>();
+  const pollVotes = new Map<
+    string,
+    Map<string, { encPayload?: Uint8Array; encIv?: Uint8Array; ts?: number }>
+  >();
 
   const chatBucket = (jid: string): Map<string, StoreMessage> => {
     let b = messages.get(jid);
@@ -208,6 +222,19 @@ export function makeInMemoryStore(): InMemoryStore {
       }),
     );
     offs.push(
+      events.on("poll.update", (v) => {
+        const pid = v.pollCreationKey.id;
+        if (!pid) return;
+        let byVoter = pollVotes.get(pid);
+        if (!byVoter) pollVotes.set(pid, (byVoter = new Map()));
+        byVoter.set(v.voterJid, {
+          encPayload: v.vote.encPayload,
+          encIv: v.vote.encIv,
+          ts: v.senderTimestampMs,
+        });
+      }),
+    );
+    offs.push(
       events.on("groups.update", (updates) => {
         for (const u of updates) {
           const prev = groupMetadata.get(u.id);
@@ -241,6 +268,31 @@ export function makeInMemoryStore(): InMemoryStore {
     return () => {
       for (const off of offs) off();
     };
+  }
+
+  function pollResults(
+    pollMsgId: string,
+    decryptVote: (
+      voterJid: string,
+      vote: { encPayload?: Uint8Array; encIv?: Uint8Array },
+    ) => string[] | undefined,
+  ): { tally: Record<string, number>; voters: number } {
+    const byVoter = pollVotes.get(pollMsgId);
+    const tally: Record<string, number> = {};
+    let voters = 0;
+    if (!byVoter) return { tally, voters };
+    for (const [voterJid, vote] of byVoter) {
+      let picked: string[] | undefined;
+      try {
+        picked = decryptVote(voterJid, vote);
+      } catch {
+        picked = undefined;
+      }
+      if (!picked) continue;
+      voters += 1;
+      for (const name of picked) tally[name] = (tally[name] ?? 0) + 1;
+    }
+    return { tally, voters };
   }
 
   function loadMessage(jid: string, id: string): StoreMessage | undefined {
@@ -290,7 +342,9 @@ export function makeInMemoryStore(): InMemoryStore {
     groupMetadata,
     labels,
     chatLabels,
+    pollVotes,
     bind,
+    pollResults,
     loadMessage,
     recentMessages,
     fetchGroupMetadata,

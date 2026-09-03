@@ -84,6 +84,17 @@ const G = "120363000@g.us";
   await store.fetchGroupMetadata(G, fetcher);
   ok("groupMetadata: refetch após participante mudar", fetches === 2);
 
+  // poll.update → pollVotes + pollResults
+  const iv = new Uint8Array([1, 2, 3]);
+  ev.emit("poll.update", { pollCreationKey: { remoteJid: A, fromMe: true, id: "P1" }, voterJid: "v1@s.whatsapp.net", vote: { encPayload: new Uint8Array([9]), encIv: iv }, senderTimestampMs: 1 });
+  ev.emit("poll.update", { pollCreationKey: { remoteJid: A, fromMe: true, id: "P1" }, voterJid: "v2@s.whatsapp.net", vote: { encPayload: new Uint8Array([8]), encIv: iv }, senderTimestampMs: 2 });
+  ev.emit("poll.update", { pollCreationKey: { remoteJid: A, fromMe: true, id: "P1" }, voterJid: "v1@s.whatsapp.net", vote: { encPayload: new Uint8Array([7]), encIv: iv }, senderTimestampMs: 3 });
+  ok("pollVotes: 2 eleitores (último voto de v1 prevalece)", store.pollVotes.get("P1")?.size === 2);
+  const res = store.pollResults("P1", (voter) => (voter === "v1@s.whatsapp.net" ? ["Sim"] : ["Não"]));
+  ok("pollResults: tally", res.tally.Sim === 1 && res.tally["Não"] === 1 && res.voters === 2);
+  const res2 = store.pollResults("P1", () => undefined); // não decifrou nenhum
+  ok("pollResults: votos que não decifram são ignorados", res2.voters === 0);
+
   // labels
   ev.emit("labels.edit", { id: "1", name: "Cliente", color: 2 });
   ev.emit("labels.edit", { id: "2", name: "Spam" });
