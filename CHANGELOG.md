@@ -79,6 +79,14 @@ be called out here and announced on the
   edge — `connectOni` is fine), and `node_modules` bare-specifier resolution
   (`#2625`) for `import "oniwalib"`.
 
+### Added (more)
+- **`renderQr` / `printQr` / `qrMatrix`** — terminal QR rendering, **colorful by
+  default** (rainbow gradient on the dark modules; `color` also takes a fixed
+  `[r,g,b]` or a per-module function). A reader keys on dark/light contrast not
+  hue, so it scans the same. `connect-bot` uses it (`ONI_QR_COLOR` =
+  `rainbow` | `off` | `r,g,b`). `qrcode-terminal` moved to `dependencies`.
+- **`jsonAuthState` / `jsonFileAuthState`** — see below.
+
 ### Packaging
 - Cross-runtime `exports`: **bun** and **RTS** resolve `import "oniwalib"` to
   `src/index.ts` (TypeScript, no build); **node** resolves to `dist/index.js` — a

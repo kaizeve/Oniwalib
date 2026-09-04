@@ -99,6 +99,16 @@ Need `fetch` in `openWhatsApp`, plus a Signal session with `jid` (1:1).
 
 Helpers (from `oniwalib` root): `hasDownloadableMedia(msg)`, `imageDimensions(bytes)`, `mp4Dimensions(bytes)`, `fetchLinkPreview(text, fetch)`, `firstUrl(text)`.
 
+### QR rendering
+
+| helper | what |
+|---|---|
+| `renderQr(qrString, opts?)` | the `connection.update` `qr` as terminal lines. **Colorful by default** — `opts.color` is `"rainbow"` (default), a fixed `[r,g,b]`, or `(row,col,size) => [r,g,b]`; `opts.background` (default light), `opts.margin` (default 2), `opts.plain` (b&w). A reader keys on dark-vs-light contrast, not hue, so it scans the same |
+| `printQr(qrString, opts?)` | `console.log(renderQr(...))` |
+| `qrMatrix(qrString)` | the raw `boolean[][]` module grid |
+
+Needs `qrcode-terminal` resolvable from `node_modules` — on RTS (`#2625`) `qrMatrix`/`renderQr` throw; print the raw `u.qr` string there.
+
 ### Status (`status@broadcast`)
 
 | method | what |

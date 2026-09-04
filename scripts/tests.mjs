@@ -17,7 +17,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 // A mesma ordem de sempre. Editar aqui é editar a suíte.
 const FILES = [
   "version", "wire", "wabinary", "jid", "e2e-message", "crypto", "noise", "auth",
-  "file-state", "json-state", "socket", "ws-connector", "signal", "lid", "sender-key", "prekeys", "messages", "media", "link-preview",
+  "file-state", "json-state", "qr", "socket", "ws-connector", "signal", "lid", "sender-key", "prekeys", "messages", "media", "link-preview",
   "profile", "privacy", "usync", "groups", "appstate", "channels", "reaction", "presence",
   "calls", "blocklist", "polls", "history", "store", "business", "notifications", "bot", "pairing", "client",
 ];

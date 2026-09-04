@@ -31,7 +31,7 @@
 // mensagem (a sessão vem daí). Precisa de `WebSocket` cliente com header Origin
 // (bun tem). NÃO pareie uma conta que você não pode perder.
 
-import qrcode from "qrcode-terminal";
+import { renderQr } from "../src/qr/index";
 import { openWhatsApp } from "../src/client";
 import { fileAuthState } from "../src/auth/file-state";
 import { OniBot, type IncomingMessage } from "../src/bot/bot";
@@ -523,7 +523,21 @@ conn.events.on("call", (calls) => {
 conn.events.on("connection.update", (u) => {
   if (u.qr) {
     console.log("\nescaneie (WhatsApp > Aparelhos conectados > Conectar um aparelho):\n");
-    qrcode.generate(u.qr, { small: true });
+    // QR colorido (RGB nos módulos escuros — o contraste é o que o leitor usa,
+    // então lê igual). `ONI_QR_COLOR` = "rainbow" (default) | "off" | "r,g,b".
+    const spec = process.env.ONI_QR_COLOR ?? "rainbow";
+    try {
+      if (spec === "off") {
+        console.log(renderQr(u.qr, { plain: true }));
+      } else if (/^\d+,\d+,\d+$/.test(spec)) {
+        const [r, g, b] = spec.split(",").map(Number) as [number, number, number];
+        console.log(renderQr(u.qr, { color: [r, g, b] }));
+      } else {
+        console.log(renderQr(u.qr)); // rainbow
+      }
+    } catch {
+      console.log(u.qr); // runtime sem encoder (RTS) — string crua
+    }
     console.log("\n(o QR troca sozinho a cada ~20s até você escanear)");
   }
   if (u.isNewLogin) console.log(`\n✅ pareado! device = ${auth.creds.me?.id}`);

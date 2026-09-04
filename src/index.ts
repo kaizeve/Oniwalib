@@ -288,6 +288,7 @@ export {
   jsonFileAuthState,
   type JsonAuthState,
 } from "./auth/json-state";
+export { renderQr, printQr, qrMatrix, type QrOptions } from "./qr/index";
 
 export {
   Emitter,

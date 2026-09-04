@@ -15,7 +15,7 @@
 // read/write, no `stat`, so it works on RTS (unlike `fileAuthState`). Scan the
 // QR once; later runs reconnect from the file.
 
-import { openWhatsApp, jsonFileAuthState, messageText } from "../src/index";
+import { openWhatsApp, jsonFileAuthState, messageText, renderQr } from "../src/index";
 
 const auth = jsonFileAuthState("./oni-auth-rts.json");
 
@@ -27,8 +27,12 @@ const conn = openWhatsApp({
 
 conn.events.on("connection.update", (u) => {
   if (u.qr) {
-    console.log("\nescaneie (WhatsApp > Aparelhos conectados > Conectar um aparelho):");
-    console.log(u.qr, "\n"); // raw QR string — render it with any QR lib / site
+    console.log("\nescaneie (WhatsApp > Aparelhos conectados > Conectar um aparelho):\n");
+    try {
+      console.log(renderQr(u.qr)); // colorful; needs the encoder from node_modules
+    } catch {
+      console.log(u.qr, "\n"); // RTS: no node_modules resolution yet — raw string
+    }
   }
   if (u.connection === "open") console.log("🟢 conectado");
   if (u.connection === "close") console.log("🔴 fechou:", u.lastDisconnect?.error?.message ?? "");
