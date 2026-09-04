@@ -55,12 +55,13 @@ const ok = (n: string, c: boolean, d = "") => {
   const color = renderQr(text, { margin: 1 });
 
   const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
-  // both use the ▀ half-block; strip color and the dark/light pattern must match
   const cStripped = stripAnsi(color);
   ok("colorido: mesma contagem de linhas", color.split("\n").length === plain.split("\n").length);
-  // in the colored render every cell is "▀" (fg=top module, bg=bottom); the
-  // geometry lives in the color, so after stripping it's a block of ▀.
-  ok("colorido: só meio-blocos após tirar ANSI", /^[▀\n]+$/.test(cStripped));
+  // the geometry lives in the CHARACTER, not only the colour — so stripping the
+  // ANSI from the colored render must yield the exact same block art as `plain`
+  // (a terminal that drops colour still scans it).
+  ok("colorido: geometria == plain após tirar ANSI", cStripped === plain, "stripped color != plain");
+  ok("colorido: usa █ ▀ ▄ e espaço", /█/.test(cStripped) && /▀/.test(cStripped) && /▄/.test(cStripped) && / /.test(cStripped));
   ok("colorido (256): tem códigos de cor", /\x1b\[38;5;\d+m/.test(color) && /\x1b\[48;5;\d+m/.test(color));
   const tc = renderQr(text, { colorDepth: "truecolor" });
   ok("truecolor opt-in: códigos 24-bit", /\x1b\[38;2;\d+;\d+;\d+m/.test(tc));

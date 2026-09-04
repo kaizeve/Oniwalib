@@ -133,24 +133,45 @@ export function renderQr(text: string, opts: QrOptions = {}): string {
       lines.push(line);
       continue;
     }
-    // colored: only re-emit an ANSI code when the fg/bg actually changes
+    // colored: the CHARACTER carries the dark/light pattern (so it still scans
+    // if a terminal drops the ANSI codes), the colour carries the hue. Re-emit
+    // an SGR only when it changes.
     let line = "";
     let curFg: Rgb | undefined;
     let curBg: Rgb | undefined;
+    const setFg = (c: Rgb) => {
+      if (!curFg || !sameRgb(curFg, c)) {
+        line += fg(c);
+        curFg = c;
+      }
+    };
+    const setBg = (c: Rgb) => {
+      if (!curBg || !sameRgb(curBg, c)) {
+        line += bg(c);
+        curBg = c;
+      }
+    };
     for (let c = 0; c < total; c++) {
       const top = dark(r, c);
       const bot = r + 1 < total ? dark(r + 1, c) : false;
       const topCol: Rgb = top ? darkColor(opts.color, r, c, size) : light;
       const botCol: Rgb = bot ? darkColor(opts.color, r + 1, c, size) : light;
-      if (!curFg || !sameRgb(curFg, topCol)) {
-        line += fg(topCol);
-        curFg = topCol;
+      if (top && bot) {
+        setFg(topCol);
+        setBg(botCol);
+        line += "█"; // full block — reads as dark even with colour stripped
+      } else if (top) {
+        setFg(topCol);
+        setBg(light);
+        line += "▀";
+      } else if (bot) {
+        setFg(botCol);
+        setBg(light);
+        line += "▄";
+      } else {
+        setBg(light);
+        line += " ";
       }
-      if (!curBg || !sameRgb(curBg, botCol)) {
-        line += bg(botCol);
-        curBg = botCol;
-      }
-      line += "▀";
     }
     lines.push(line + RESET);
   }

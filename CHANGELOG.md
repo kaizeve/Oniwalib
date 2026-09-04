@@ -83,8 +83,11 @@ be called out here and announced on the
 - **`renderQr` / `printQr` / `qrMatrix`** — terminal QR rendering, **colorful by
   default** (rainbow gradient on the dark modules; `color` also takes a fixed
   `[r,g,b]` or a per-module function). A reader keys on dark/light contrast not
-  hue, so it scans the same. `connect-bot` uses it (`ONI_QR_COLOR` =
-  `rainbow` | `off` | `r,g,b`). `qrcode-terminal` moved to `dependencies`.
+  hue, so it scans the same. The module geometry is carried by the block
+  character (`█`/`▀`/`▄`/space), not only the colour — so it still scans as a
+  plain B&W QR on a terminal that drops the ANSI (e.g. `pm2 logs`). `connect-bot`
+  uses it (`ONI_QR_COLOR` = `rainbow` | `off` | `r,g,b`). `qrcode-terminal`
+  moved to `dependencies`.
 - **`jsonAuthState` / `jsonFileAuthState`** — see below.
 
 ### Packaging
