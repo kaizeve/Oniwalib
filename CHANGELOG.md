@@ -55,8 +55,12 @@ be called out here and announced on the
   `group-participants.update`, `poll.update`, `call`, `blocklist.update`,
   `messaging-history.set`, `node.recv` / `node.send`.
 - **RTS** — `crypto` closed on the engine (XEdDSA, X25519, `inflate`);
-  `RTS_GAPS` empty. Engine quirks worked around in source and reported upstream
-  (`UrubuCode/rts#2611`, `#2612`, `#2617`).
+  `RTS_GAPS` empty. Three engine bugs found while porting, filed, and **fixed
+  upstream**: `#2611` (module-graph AOT), `#2612` (regex `[`), `#2617`
+  (const-arrow-over-param miscompile). `rts compile src/index.ts` now produces a
+  native ELF binary that runs the crypto / codec / Signal / store paths. Left:
+  the RTS TLS/WS transport connector for a binary that connects live, and
+  `node_modules` bare-specifier resolution (`#2625`) for `import "oniwalib"`.
 
 ### Packaging
 - Cross-runtime `exports`: **bun** and **RTS** resolve `import "oniwalib"` to

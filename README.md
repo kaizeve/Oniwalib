@@ -107,10 +107,17 @@ app-state sync and the rest of the surface in [`docs/API.md`](docs/API.md). A
 reference bot (`examples/connect-bot.ts`) has been running against a live
 account under `pm2` throughout development.
 
-On **RTS** the whole library compiles and every layer except the live socket
-runs green (`rts run` / `rts test`); connecting on the engine still needs the
-RTS transport connector (TLS + WebSocket), and a single native binary waits on
-module-graph AOT ([UrubuCode/rts#2611](https://github.com/UrubuCode/rts/issues/2611)).
+On **RTS** the whole library compiles and runs green (`rts run` / `rts test`),
+**and `rts compile src/index.ts` now produces a native ELF binary** that runs
+the crypto / codec / Signal / store paths — module-graph AOT landed
+([#2611](https://github.com/UrubuCode/rts/issues/2611), with
+[#2612](https://github.com/UrubuCode/rts/issues/2612) /
+[#2617](https://github.com/UrubuCode/rts/issues/2617) fixed alongside). What's
+left for a native binary that *connects* is the RTS transport connector (TLS +
+WebSocket) — `node:tls` / `node:net` / `ws` are now available on the engine, so
+it's writable. Consuming oniwalib on RTS is by vendored source today;
+`import "oniwalib"` from `node_modules` waits on the engine's bare-specifier
+resolver ([#2625](https://github.com/UrubuCode/rts/issues/2625)).
 
 Suite: **1025 / 1025 on bun**, **green on RTS** (`rts run` / `rts test`).
 `client` and `file-state` skip themselves on the engine — the first drives the
@@ -138,7 +145,10 @@ in the library's path.
 | `business/` | Business read — `getBusinessProfile` / `getCatalog` / `getCollections` / `getOrderDetails` | ✅ | ✅ |
 | `store/` | `makeInMemoryStore` — chats / contacts / messages / presence / group meta / labels / poll votes, `toJSON`/`fromJSON` | ✅ | ✅ |
 | `notifications.ts` · `events/` · `profiles/` | `<notification>` → `contacts.update`; typed event surface; stock vs modified fingerprint | ✅ | ✅ |
-| `transport/` | `Transport` interface + `MockTransport` + `WebSocketTransport` (bun/node); **RTS TLS/WS connector** | ✅ | ⛔ |
+| `transport/` | `Transport` interface + `MockTransport` + `WebSocketTransport` (bun/node); RTS TLS/WS connector | ✅ | 🚧³ |
+
+<sub>³ RTS now has `node:net` / `node:tls` / `node:http` / `node:zlib` and `ws`;
+the RTS connector is the next piece for a native binary that connects live.</sub>
 
 <sub>¹ `test/file-state.test.ts` red on RTS — an `ENOENT` on a freshly written
 file mid-test; each `node:fs` call works in isolation, so a sequencing edge in
@@ -149,15 +159,15 @@ RTS's `node:fs`. The library never imports this file unless you opt in (use
 itself is red on the engine ("promise cannot settle" — an async-scheduler edge
 in the test's mock transport driver, not the library).</sub>
 
-<sub>RTS engine quirks worked around in the source, all reported upstream:
-const-arrow `?.` TDZ `ReferenceError` (use a `function` decl);
-`[…].map(…).join(sep)` with a non-ASCII `sep` prepends a stray separator
-([#2612](https://github.com/UrubuCode/rts/issues/2612)); a closure over a param
-that indexes `Map.get(k)?.[0]` returns the param, not the value
-([#2617](https://github.com/UrubuCode/rts/issues/2617)); a single native binary
-waits on module-graph AOT
-([#2611](https://github.com/UrubuCode/rts/issues/2611)). `rts run` / `rts test`
-compile the graph today.</sub>
+<sub>RTS engine issues found while porting, **all filed and now fixed
+upstream**: module-graph AOT
+([#2611](https://github.com/UrubuCode/rts/issues/2611)), regex `[` in a char
+class ([#2612](https://github.com/UrubuCode/rts/issues/2612)), a closure over a
+param that indexes `Map.get(k)?.[0]` returning the param
+([#2617](https://github.com/UrubuCode/rts/issues/2617)). One workaround stays in
+the source (const-arrow `?.` TDZ → `function` decl). Open:
+`node_modules` bare-specifier resolution
+([#2625](https://github.com/UrubuCode/rts/issues/2625)).</sub>
 
 ### Phase 0 — engine primitives
 
