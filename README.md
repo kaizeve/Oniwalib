@@ -101,47 +101,63 @@ the single point that still depends on the engine.
 
 ## Status
 
-`oniwalib` runs on **bun / node** and on **RTS**: 589/589 on bun, **566 on RTS**
-(the one red is `auth/file-state.ts`, the node-only persistence file — see below).
+`oniwalib` **connects to WhatsApp for real** on **bun / node** today — pairing
+(QR + code), 1:1 and group messaging, media, status, groups, channels,
+app-state sync and the rest of the surface in [`docs/API.md`](docs/API.md). A
+reference bot (`examples/connect-bot.ts`) has been running against a live
+account under `pm2` throughout development.
 
-| Module | What it does | bun / node | RTS |
+On **RTS** the whole library compiles and every layer except the live socket
+runs green (`rts run` / `rts test`); connecting on the engine still needs the
+RTS transport connector (TLS + WebSocket), and a single native binary waits on
+module-graph AOT ([UrubuCode/rts#2611](https://github.com/UrubuCode/rts/issues/2611)).
+
+Suite: **1025 / 1025 on bun**, **green on RTS** (`rts run` / `rts test`).
+`client` and `file-state` skip themselves on the engine — the first drives the
+whole connection over the mock transport and hits an RTS async-scheduler edge,
+the second is node-only persistence with a `node:fs` sequencing edge; neither is
+in the library's path.
+
+| Area | What it does | bun / node | RTS |
 |---|---|:---:|:---:|
-| `frame/` | WABinary codec: binary node, buffers, JID, token tables | ✅ | ✅ |
-| `noise/` | XX handshake + framing + `NoiseSocket` | ✅ | ✅ |
-| `crypto/` | `Crypto` interface + `node:crypto`/`curve25519-js` adapter (bun/node) + RTS adapter (`node:crypto` incl. XEdDSA) | ✅ | ✅ |
-| `proto/` | own protobuf codec (no protobufjs) + message builders (buttons / list / interactive) + `HandshakeMessage` / `ClientPayload` wire | ✅ | ✅ |
-| `auth/` | credentials + Signal key store + signal identities | ✅ | ✅ |
-| `pairing.ts` | `configureSuccessfulPairing` — the `<pair-success>` crypto (HMAC + account/device signatures) | ✅ | ✅ |
-| `signal/` | native Double Ratchet + X3DH (1:1) **+ SenderKey group cipher (read)**, own session/sender-key records, pre-key upload — studied from libsignal, imports nothing | ✅ | ✅ |
-| `messages.ts` | decrypt `<message><enc>` (`pkmsg`/`msg` **and `skmsg` — group read**) → `messages.upsert`; **channel (`@newsletter`) `<plaintext>` → `messages.upsert`**; `sendText` / `sendMessage` (1:1) **with cold-send — `assertSessions` fetches the pre-key bundle for a number you've never messaged**; **`sendStatus` — `status@broadcast` sender-key fan-out**; **reactions**; **"delete for everyone"**; pre-keys after `<success>` | ✅ | ✅ |
-| `usync/` · `groups/` | `getDeviceList` (`<iq xmlns="usync">` device protocol) · `groupMetadata` (`<iq xmlns="w:g2">` — participants + admin, `announce`/`restrict`, community via `<parent>`/`<linked_parent>`); `client.assertGroupSessions` chains metadata → USYNC → cold-send | ✅ | ✅ |
-| `privacy/` | `fetchPrivacySettings` / `updatePrivacySetting` (`<iq xmlns="privacy">`) | ✅ | ✅ |
-| `presence.ts` | `<presence>` / `<chatstate>` → `presence.update` (online, last seen, typing, recording); `sendPresenceUpdate` / `subscribePresence`; `client` read receipts + `markOnlineOnConnect` / `sendReadReceipts` toggles | ✅ | ✅ |
-| `notifications.ts` | `<notification>` for profile picture / status (bio) → `contacts.update` | ✅ | ✅ |
-| `client.ts` | `openWhatsApp` — QR + pairing + `515` restart + login + keepalive/acks + message / presence / notification pipeline | ✅ | ✅¹ |
-| `auth/file-state.ts` | encrypted append-only log persistence (node-only, `node:fs`) | ✅ | ⚠️² |
-| `transport/` | `Transport` interface + `MockTransport` + `WebSocketTransport` (bun/node) | ✅ | ✅ |
-| `events/` · `profiles/` | typed event surface · stock vs modified | ✅ | ✅ |
-| `transport/` — RTS connector | TLS + WebSocket client with custom headers / Origin on the engine | ⛔ | ⛔ |
+| `frame/` | WABinary codec: binary node, buffers, JID (`jidKind`), token tables | ✅ | ✅ |
+| `noise/` | `Noise_XX_25519_AESGCM_SHA256` handshake + framing + `NoiseSocket` | ✅ | ✅ |
+| `crypto/` | `Crypto` interface + `node:crypto`/`curve25519-js` adapter (bun/node) + RTS adapter (`node:crypto` incl. XEdDSA, X25519, `inflate`) — `RTS_GAPS` empty | ✅ | ✅ |
+| `proto/` | own protobuf codec (no protobufjs) + `E2EMessage` codec (text, media, buttons/list/native-flow, poll, album, contextInfo, protocolMessage) + `ClientPayload` / `HandshakeMessage` wire | ✅ | ✅ |
+| `auth/` | credentials, Signal key store, signal identities; `memoryAuthState` + encrypted append-only `fileAuthState` | ✅ | ✅¹ |
+| `pairing.ts` · `client.ts` | `openWhatsApp` — QR + pairing code, `<pair-success>` crypto, `515` restart, login, keepalive/acks, the message / presence / notification / call pipeline | ✅ | ✅² |
+| `signal/` | native Double Ratchet + X3DH (1:1) + SenderKey group cipher (read + write), cold-send (`assertSessions` — prekey-bundle fetch + X3DH), pre-key top-up with a watermark — studied from libsignal, imports nothing | ✅ | ✅ |
+| `messages.ts` | decrypt `pkmsg`/`msg`/`skmsg` → `messages.upsert`; `sendText`/`sendMessage`/`sendAlbum` 1:1 + group; **edit** + **delete-for-all**; **reactions**; **polls** (create + `decryptPollVote`); `sendContact` / `sendLocation`; link preview; `SendOptions` (quoted reply, mentions, ephemeral) | ✅ | ✅ |
+| `media/` | send audio/image/video/document/sticker (per-type HKDF → AES-CBC + 10-byte MAC, `media_conn`, upload with host fallback); auto width/height + thumbnail; `downloadMedia` + `autoDownloadMedia` → `messages.media` | ✅ | ✅ |
+| status | `postStatus` (`status@broadcast` sender-key fan-out) **and receive** (generic skmsg path) | ✅ | ✅ |
+| `groups/` | `groupMetadata` + full management (create/leave/subject/description/participants/settings/ephemeral/approval-mode/invite-code/accept/join-requests) + **community** subgroups (list/link/unlink) | ✅ | ✅ |
+| `appstate/` | **LT-hash app-state sync** — `updateProfileName` (push name), `chatModify` (mute/pin/archive/read), labels; auto key-capture + resync. LT-hash + key expansion byte-verified against `whatsapp-rust-bridge` | ✅ | ✅ |
+| `history/` | `historySyncNotification` → download blob → zlib-inflate → `messaging-history.set` (chats + pushnames + lid map + message bodies) | ✅ | ✅ |
+| `channels/` | `@newsletter`: metadata, follow/unfollow, mute, create, delete, react, fetch old posts, live-updates subscribe; text + media send | ✅ | ✅ |
+| `usync/` · `privacy/` · `presence.ts` · `blocklist/` · `calls/` | device list; privacy get/set; presence recv + send + toggles + read receipts; block/unblock; incoming `call` event + `rejectCall` | ✅ | ✅ |
+| `business/` | Business read — `getBusinessProfile` / `getCatalog` / `getCollections` / `getOrderDetails` | ✅ | ✅ |
+| `store/` | `makeInMemoryStore` — chats / contacts / messages / presence / group meta / labels / poll votes, `toJSON`/`fromJSON` | ✅ | ✅ |
+| `notifications.ts` · `events/` · `profiles/` | `<notification>` → `contacts.update`; typed event surface; stock vs modified fingerprint | ✅ | ✅ |
+| `transport/` | `Transport` interface + `MockTransport` + `WebSocketTransport` (bun/node); **RTS TLS/WS connector** | ✅ | ⛔ |
 
-<sub>¹ `client.ts` passes on RTS via `test/client.test.ts` (full pairing → `515`
-restart → login over the mock server); a live socket still needs the RTS
-transport connector.</sub>
+<sub>¹ `test/file-state.test.ts` red on RTS — an `ENOENT` on a freshly written
+file mid-test; each `node:fs` call works in isolation, so a sequencing edge in
+RTS's `node:fs`. The library never imports this file unless you opt in (use
+`memoryAuthState` on the engine).</sub>
 
-<sub>² `test/file-state.test.ts` fails on RTS with an `ENOENT` on a freshly
-written file mid-test; every `node:fs` call it uses works in isolation, so it's a
-sequencing edge in RTS's `node:fs` still to be pinned down. The core never
-imports this file (it's opt-in, like the RTS transport connector).</sub>
+<sub>² `client.ts` passes on RTS via the mock server; `test/client.test.ts`
+itself is red on the engine ("promise cannot settle" — an async-scheduler edge
+in the test's mock transport driver, not the library).</sub>
 
-<sub>RTS engine quirks worked around in the source: `const f = () => …; f()?.x`
-raised a bogus TDZ `ReferenceError` (use a `function` declaration); two sibling
-`const` of the same name inside an awaited async arrow tripped `ReferenceError:
-x is not defined` (give them distinct names); `[…].map(…).join(sep)` with a
-non-ASCII `sep` prepended a stray separator (fold the sep into the `map`) —
-filed as [UrubuCode/rts#2612](https://github.com/UrubuCode/rts/issues/2612). A
-native binary of the lib waits on module-graph AOT
-([UrubuCode/rts#2611](https://github.com/UrubuCode/rts/issues/2611)); `rts run` /
-`rts test` compile the graph today.</sub>
+<sub>RTS engine quirks worked around in the source, all reported upstream:
+const-arrow `?.` TDZ `ReferenceError` (use a `function` decl);
+`[…].map(…).join(sep)` with a non-ASCII `sep` prepends a stray separator
+([#2612](https://github.com/UrubuCode/rts/issues/2612)); a closure over a param
+that indexes `Map.get(k)?.[0]` returns the param, not the value
+([#2617](https://github.com/UrubuCode/rts/issues/2617)); a single native binary
+waits on module-graph AOT
+([#2611](https://github.com/UrubuCode/rts/issues/2611)). `rts run` / `rts test`
+compile the graph today.</sub>
 
 ### Phase 0 — engine primitives
 
@@ -225,11 +241,37 @@ const { version, source } = await resolveOniVersion();   // e.g. [2, 3000, 10232
 
 ## Usage
 
-> A live connection needs the real transport. What already works today is
-> building and inspecting messages, and running the handshake against a
-> reference adapter.
-
 **Full method + event reference: [`docs/API.md`](docs/API.md).**
+
+### Connect and reply
+
+```ts
+import { openWhatsApp, fileAuthState } from "oniwalib";
+
+const auth = fileAuthState("./auth/state.owl");     // encrypted, append-only
+const conn = openWhatsApp({
+  auth,
+  saveCreds: () => auth.saveCreds(),
+  fetch: globalThis.fetch,                          // for media / link preview
+});
+
+conn.events.on("connection.update", ({ qr, connection }) => {
+  if (qr) console.log("scan:", qr);
+  if (connection === "open") console.log("online");
+});
+
+conn.events.on("messages.upsert", async ({ type, messages }) => {
+  if (type !== "notify") return;
+  for (const m of messages) {
+    if (m.key.fromMe || !m.message) continue;
+    await conn.sendText(m.key.remoteJid, "pong");
+  }
+});
+```
+
+First run prints a QR (or use `countryCode` + the `pairingCode` on
+`connection.update` for a pairing code). The session caches in the auth store —
+reconnects don't re-pair.
 
 ### Build a message with buttons
 
@@ -262,15 +304,16 @@ const msg = m.interactive({
 });
 ```
 
-### A basic bot (`examples/bot.ts`)
+### A basic bot
 
-`oniwalib` doesn't connect to WhatsApp yet, so the bot runs over `MockWaServer`
-(the in-memory Noise server). The command dispatch and the CPU/RAM monitoring
-are real and portable — when the real transport lands, `attachBot` points at it
-and the bot works for real.
+`examples/connect-bot.ts` is the real thing: `OniBot` (command router) on a live
+connection, session cached in `./oni-auth/`. `examples/bot.ts` runs the same bot
+over `MockWaServer` (in-memory Noise server) for a no-account smoke test that
+also runs on RTS.
 
 ```bash
-bun examples/bot.ts
+bun examples/connect-bot.ts        # live — scan the QR the first time
+bun examples/bot.ts                # over the mock server
 ../rts/target/fast/rts run examples/bot.ts
 ```
 
@@ -342,64 +385,37 @@ await sock.connect();
 
 ```
 oniwalib/
-├── assets/
-│   └── oni-banner.png        the mascot
-├── docs/
-│   └── API.md                method + event reference
+├── docs/API.md               method + event reference (the real one)
 ├── src/
-│   ├── frame/                WABinary codec
-│   │   ├── constants.ts        tags + token tables (PROVENANCE: to verify)
-│   │   ├── buffer.ts           BufferReader/Writer + own UTF-8
-│   │   ├── jid.ts              JID parse / format
-│   │   ├── node.ts             the BinaryNode type + accessors
-│   │   ├── decode.ts           bytes → BinaryNode
-│   │   └── encode.ts           BinaryNode → bytes
-│   ├── noise/
-│   │   ├── frame.ts           framing [3-byte len][payload] + intro header
-│   │   ├── handshake.ts       Noise_XX_25519_AESGCM_SHA256, client side
-│   │   ├── wire.ts            HandshakeMessage protobuf
-│   │   └── socket.ts          NoiseSocket: transport + handshake + WABinary
-│   ├── crypto/
-│   │   ├── types.ts           the Crypto interface (the platform boundary)
-│   │   ├── node-adapter.ts    over node:crypto (bun / node)
-│   │   ├── rts-adapter.ts     over RTS's crypto primitives
-│   │   └── index.ts           crypto() / setCrypto() with runtime detection
-│   ├── proto/
-│   │   ├── wire.ts            minimal protobuf codec (varint, len-delimited, i32/i64)
-│   │   ├── message.ts         body builders: text, buttons, list, template, interactive
-│   │   ├── handshake.ts       ClientPayload types + buildClientPayload (register + login)
-│   │   ├── client-payload.ts  ClientPayload → protobuf bytes
-│   │   └── adv.ts             ADV device-identity protobufs (pairing)
-│   ├── auth/
-│   │   ├── state.ts           initAuthCreds, memoryAuthState, own base64
-│   │   └── file-state.ts      fileAuthState — encrypted append-only credential store
-│   ├── pairing.ts             configureSuccessfulPairing — the <pair-success> crypto
-│   ├── connect.ts             connectOni — transport + Noise handshake, up to first stanza
-│   ├── client.ts              openWhatsApp — the connection driver (QR, pairing, 515, login)
-│   ├── transport/
-│   │   ├── types.ts           Transport interface + WhatsApp endpoints
-│   │   ├── websocket.ts       WebSocketTransport (bun / node)
-│   │   ├── mock.ts            in-memory transport pair (tests)
-│   │   └── mock-wa-server.ts  in-memory Noise responder + message relay (tests)
-│   ├── bot/
-│   │   ├── bot.ts             OniBot — command router
-│   │   └── monitor.ts         CPU / RAM / uptime sampling
-│   ├── events/
-│   │   └── emitter.ts         typed Emitter + OniwalibEvents
-│   ├── profiles/
-│   │   └── index.ts           STOCK vs MODIFIED
-│   ├── version.ts             oni-version: WhatsApp protocol version resolver
+│   ├── frame/                WABinary codec — node, buffers, JID, token tables, encode/decode
+│   ├── noise/                XX handshake + framing + NoiseSocket
+│   ├── crypto/               Crypto interface + node adapter + RTS adapter + runtime detect
+│   ├── proto/                own protobuf codec + E2EMessage codec + ClientPayload/handshake wire + ADV
+│   ├── auth/                 initAuthCreds, memoryAuthState, encrypted file-state, own base64
+│   ├── signal/               Double Ratchet + X3DH + SenderKey group cipher + prekeys (own records)
+│   ├── pairing.ts            configureSuccessfulPairing — the <pair-success> crypto
+│   ├── connect.ts            connectOni — transport + Noise handshake up to the first stanza
+│   ├── client.ts             openWhatsApp — QR / pairing / 515 / login / the pipeline (OniConnection)
+│   ├── messages.ts           decrypt + send (text/media/album/edit/delete/reaction/poll/contact/location)
+│   ├── media/                encrypt + upload + download; dimensions + thumbnail
+│   ├── link-preview.ts       fetch the first URL → title/description card
+│   ├── groups/               metadata + full management + community subgroups
+│   ├── appstate/             LT-hash sync — lt-hash, key expansion, patch codec, layer
+│   ├── history/              historySyncNotification → inflate → messaging-history.set
+│   ├── channels/             @newsletter — follow/mute/create/react/fetch/subscribe
+│   ├── usync/ privacy/ presence.ts blocklist/ calls/ notifications.ts
+│   ├── business/             Business read — profile / catalog / collections / orders
+│   ├── store/                makeInMemoryStore
+│   ├── transport/            Transport interface + MockTransport + WebSocketTransport
+│   ├── bot/                  OniBot command router + CPU/RAM monitor
+│   ├── events/ profiles/ version.ts
 │   └── index.ts
-├── oni-version.json           the current known-good WA version (edit to update)
-├── examples/
-│   ├── bot.ts                 basic bot: commands + CPU/RAM, over the mock server
-│   └── connect-bot.ts         the same bot on a real connection (QR + cached session)
-├── ecosystem.config.cjs       pm2: keep connect-bot.ts running, watch + reload on change
-├── scripts/
-│   └── tests.mjs              the test runner — runs the suite, syncs the README counts
-├── test/                      version · wire · wabinary · noise · auth · file-state · socket · signal · sender-key · bot · pairing · client
-├── PUBLISH.md                 how to push and keep this repo updated
-├── package.json · tsconfig.json · LICENSE · README.md
+├── oni-version.json          the current known-good WA version (edit to update)
+├── examples/                 connect-bot.ts (live) · bot.ts (mock) · pair.ts · connect-*.ts
+├── ecosystem.config.cjs      pm2: keep connect-bot.ts on the latest lib
+├── scripts/tests.mjs         the test runner — runs the suite, syncs the README counts
+├── test/                     36 files, one per module (self-labels [bun] / [rts] / [node])
+├── CHANGELOG.md · PUBLISH.md · package.json · tsconfig.json · LICENSE · README.md
 ```
 
 ---

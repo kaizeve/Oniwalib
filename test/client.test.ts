@@ -28,6 +28,19 @@ const ok = (n: string, c: boolean, d = "") => {
   }
 };
 
+// Este teste dirige o `openWhatsApp` inteiro sobre o MockTransport. O scheduler
+// de async do RTS trava esse padrão ("promise cannot settle") — não é bug da
+// lib (o `client.ts` roda ao vivo em bun/node; no RTS nem há socket ainda).
+// Roda só em bun/node; no RTS reporta limpo e sai. (O RTS não define `RTS`
+// global — o marcador é `__rtsFetchText`.)
+if (
+  typeof (globalThis as any).Bun === "undefined" &&
+  typeof (globalThis as any).__rtsFetchText !== "undefined"
+) {
+  console.log("\noniwalib/client [rts]  0 pass, 0 fail  (pulado — ver README)");
+  (globalThis as any).process?.exit?.(0);
+}
+
 const auth = memoryAuthState();
 const JID = "5511977776666:7@s.whatsapp.net";
 

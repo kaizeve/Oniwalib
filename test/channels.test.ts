@@ -200,7 +200,10 @@ const JID = "120363000000000000@newsletter";
 // --- ações novas: unfollow / mute / unmute / create / delete / react ---
 {
   const seen: Array<{ qid?: string; vars: any }> = [];
-  const last = () => seen[seen.length - 1];
+  // `function` (não const-arrow) — o RTS trava `const f = () => …; f()?.x` (TDZ).
+  function last() {
+    return seen[seen.length - 1];
+  }
   function mkRes3(obj: unknown): BinaryNode {
     return node("iq", { type: "result" }, [node("result", {}, utf8Encode(JSON.stringify(obj)))]);
   }
@@ -214,7 +217,9 @@ const JID = "120363000000000000@newsletter";
     return mkRes3({ data: {} });
   };
   const sent3: BinaryNode[] = [];
-  const lastSent = () => sent3[sent3.length - 1]!;
+  function lastSent(): BinaryNode {
+    return sent3[sent3.length - 1]!;
+  }
   const ch3 = createChannelsLayer({ query: query3, sendNode: (n) => sent3.push(n), genId: () => "GID1" });
 
   await ch3.unfollowNewsletter(JID);

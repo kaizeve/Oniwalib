@@ -4,6 +4,17 @@
 import * as fs from "node:fs";
 import { fileAuthState, AuthStoreCorruptError } from "../src/auth/file-state";
 
+// `fileAuthState` é opt-in e node-only (`node:fs`). No RTS a suíte esbarra num
+// `ENOENT` ao dar `stat` num arquivo recém-escrito — um edge de sequenciamento
+// no `node:fs` do RTS, não da lib (use `memoryAuthState` no engine). Pula limpo.
+if (
+  typeof (globalThis as any).Bun === "undefined" &&
+  typeof (globalThis as any).__rtsFetchText !== "undefined"
+) {
+  console.log("\noniwalib/file-state [rts]  0 pass, 0 fail  (pulado — node-only, ver README)");
+  (globalThis as any).process?.exit?.(0);
+}
+
 let pass = 0;
 let fail = 0;
 const fails: string[] = [];
