@@ -11,19 +11,17 @@
 // It also skips the version fetch automatically on RTS (that `fetch` blocks the
 // engine's loop and fails slowly). `oni-version.json` keeps the built-in fresh.
 //
-// Auth: this uses `memoryAuthState` so it re-pairs every run. `fileAuthState` is
-// node-only for now (a `node:fs` edge on RTS); on RTS, persist creds yourself
-// from `creds.update` (JSON) and rebuild a `memoryAuthState(creds)`.
+// Auth persists to `./oni-auth-rts.json` via `jsonFileAuthState` — plain
+// read/write, no `stat`, so it works on RTS (unlike `fileAuthState`). Scan the
+// QR once; later runs reconnect from the file.
 
-import { openWhatsApp, memoryAuthState, messageText } from "../src/index";
+import { openWhatsApp, jsonFileAuthState, messageText } from "../src/index";
 
-const auth = memoryAuthState();
+const auth = jsonFileAuthState("./oni-auth-rts.json");
 
 const conn = openWhatsApp({
   auth,
-  saveCreds: () => {
-    // persist `auth.creds` here (JSON) if you want to skip the QR next run
-  },
+  saveCreds: () => auth.saveCreds(),
   markOnlineOnConnect: true,
 });
 

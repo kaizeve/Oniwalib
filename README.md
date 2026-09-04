@@ -9,7 +9,7 @@ It talks the socket directly — no browser, no Puppeteer, no headless Chrome.
 
 <br>
 
-[![tests](https://img.shields.io/badge/tests-1042%2F1042%20passing-2ea44f?style=flat-square)](#tests)
+[![tests](https://img.shields.io/badge/tests-1056%2F1056%20passing-2ea44f?style=flat-square)](#tests)
 [![runtimes](https://img.shields.io/badge/runs%20on-bun%20%C2%B7%20node%20%C2%B7%20RTS-0b7285?style=flat-square)](#status)
 [![language](https://img.shields.io/badge/TypeScript-3178c6?style=flat-square&logo=typescript&logoColor=white)](#)
 [![status](https://img.shields.io/badge/status-early%20%C2%B7%20foundation-d9822b?style=flat-square)](#status)
@@ -117,12 +117,12 @@ handshake, and prints a pairing QR. `rts compile src/index.ts` produces a
 entrypoint is explicit — `await conn.start(); await conn.waitUntilClose();` —
 because `rts run` drains its task queue and exits without a `setInterval`, so the
 connect chain must be awaited and the process held open by a loop; bun/node don't
-need it. Open on RTS: `import "oniwalib"` from `node_modules`
-([#2625](https://github.com/UrubuCode/rts/issues/2625)) — vendor the source; and
-a persisted auth store (`fileAuthState` is node-only for now — persist
-`creds.update` yourself and rebuild `memoryAuthState(creds)`).
+need it. Auth persists with **`jsonFileAuthState(path)`** (plain read/write, no
+`stat`) — `fileAuthState`'s encrypted append-log hits a `node:fs` edge on RTS.
+Still open on RTS: `import "oniwalib"` from `node_modules`
+([#2625](https://github.com/UrubuCode/rts/issues/2625)) — vendor the source.
 
-Suite: **1042 / 1042 on bun**, **green on RTS** (`rts run` / `rts test`).
+Suite: **1056 / 1056 on bun**, **green on RTS** (`rts run` / `rts test`).
 `client` and `file-state` skip themselves on the engine — the first drives the
 whole connection over the mock transport and hits an RTS async-scheduler edge,
 the second is node-only persistence with a `node:fs` sequencing edge; neither is
@@ -226,7 +226,7 @@ community via `<parent>` / `<linked_parent>`) · `reaction` 19
 revoke → `messages.delete`; `sendReaction` encrypted back) · `pairing` 18 (the
 `<pair-success>` crypto both directions) ·
 `client` 18 (QR → pairing → `515` restart → login `<success>`, over the mock
-server) → **1042 / 1042 on bun**.
+server) → **1056 / 1056 on bun**.
 
 ### <a name="oni-version"></a>Keeping it working — the oni-version
 

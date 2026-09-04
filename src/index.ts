@@ -283,6 +283,11 @@ export {
   type FileAuthState,
   type FileAuthOptions,
 } from "./auth/file-state";
+export {
+  jsonAuthState,
+  jsonFileAuthState,
+  type JsonAuthState,
+} from "./auth/json-state";
 
 export {
   Emitter,

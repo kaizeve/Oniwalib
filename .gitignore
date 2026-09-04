@@ -14,3 +14,4 @@ bun.lockb
 *.registry-key
 oni-auth*/
 *.owl.bak.*
+oni-auth-rts.json

@@ -257,7 +257,9 @@ Needs the primary device to have shared the app-state sync keys — check
 
 | factory | what |
 |---|---|
-| `fileAuthState(path, opts?)` | encrypted append-only log on disk (`node:fs`). Compacts itself. Key file sits next to `path` (`.owl.key`) |
+| `fileAuthState(path, opts?)` | encrypted append-only log on disk (`node:fs`). Compacts itself. Key file sits next to `path` (`.owl.key`). node/bun only |
+| `jsonFileAuthState(path)` | plain JSON blob, `readFileSync`/`writeFileSync` only — **works on RTS**. Rewrites the whole file per change (a few KB). `.serialize()` returns the string |
+| `jsonAuthState(load?, save?)` | same, backed by two callbacks (`() => string?` / `(string) => void`) — bring your own KV / DB / env storage |
 | `memoryAuthState()` | in-memory — for tests or ephemeral bots |
 
 Both expose `{ creds, keys, saveCreds }` shaped as `AuthenticationState`.
