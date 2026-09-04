@@ -61,7 +61,9 @@ const ok = (n: string, c: boolean, d = "") => {
   // in the colored render every cell is "▀" (fg=top module, bg=bottom); the
   // geometry lives in the color, so after stripping it's a block of ▀.
   ok("colorido: só meio-blocos após tirar ANSI", /^[▀\n]+$/.test(cStripped));
-  ok("colorido: tem códigos de cor truecolor", /\x1b\[38;2;\d+;\d+;\d+m/.test(color) && /\x1b\[48;2;/.test(color));
+  ok("colorido (256): tem códigos de cor", /\x1b\[38;5;\d+m/.test(color) && /\x1b\[48;5;\d+m/.test(color));
+  const tc = renderQr(text, { colorDepth: "truecolor" });
+  ok("truecolor opt-in: códigos 24-bit", /\x1b\[38;2;\d+;\d+;\d+m/.test(tc));
 
   // plain render: real block art — has full blocks, half blocks and gaps
   ok("plain: usa █ ▀ ▄ e espaço", /█/.test(plain) && /▀/.test(plain) && /▄/.test(plain) && / /.test(plain));
@@ -69,8 +71,10 @@ const ok = (n: string, c: boolean, d = "") => {
 
 // --- color options -------------------------------------------------
 {
-  const solid = renderQr("test", { color: [10, 20, 30] });
-  ok("cor sólida: usa o RGB dado", solid.includes("\x1b[38;2;10;20;30m"));
+  const solid = renderQr("test", { color: [10, 20, 30], colorDepth: "truecolor" });
+  ok("cor sólida truecolor: usa o RGB dado", solid.includes("\x1b[38;2;10;20;30m"));
+  const solid256 = renderQr("test", { color: [255, 0, 0] });
+  ok("cor sólida 256: emite índice de paleta", /\x1b\[38;5;\d+m/.test(solid256));
 
   let called = 0;
   renderQr("test", {
@@ -82,7 +86,7 @@ const ok = (n: string, c: boolean, d = "") => {
   });
   ok("cor função: chamada por módulo escuro", called > 0);
 
-  const bgCustom = renderQr("test", { background: [1, 2, 3] });
+  const bgCustom = renderQr("test", { background: [1, 2, 3], colorDepth: "truecolor" });
   ok("background custom aplicado", bgCustom.includes("\x1b[48;2;1;2;3m"));
 }
 

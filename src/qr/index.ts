@@ -24,6 +24,9 @@ export interface QrOptions {
   margin?: number;
   /** No ANSI color — plain `█`/space blocks. Default `false`. */
   plain?: boolean;
+  /** `"256"` (xterm-256, the widest support — the default) or `"truecolor"`
+   *  (24-bit `\x1b[38;2;r;g;b`, only on capable terminals). */
+  colorDepth?: "256" | "truecolor";
 }
 
 /** The QR module matrix for `text`: `m[row][col]` is `true` for a dark module.
@@ -80,8 +83,22 @@ function darkColor(opt: QrOptions["color"], r: number, c: number, size: number):
 }
 
 const RESET = "\x1b[0m";
-const fg = ([r, g, b]: Rgb) => `\x1b[38;2;${r};${g};${b}m`;
-const bg = ([r, g, b]: Rgb) => `\x1b[48;2;${r};${g};${b}m`;
+
+/** RGB → nearest xterm-256 palette index (6×6×6 cube + grey ramp). */
+function rgbTo256([r, g, b]: Rgb): number {
+  if (r === g && g === b) {
+    if (r < 8) return 16;
+    if (r > 248) return 231;
+    return 232 + Math.round((r - 8) / 247 * 24);
+  }
+  const q = (v: number) => (v < 48 ? 0 : v < 115 ? 1 : Math.round((v - 35) / 40));
+  return 16 + 36 * q(r) + 6 * q(g) + q(b);
+}
+
+const fgTrue = ([r, g, b]: Rgb) => `\x1b[38;2;${r};${g};${b}m`;
+const bgTrue = ([r, g, b]: Rgb) => `\x1b[48;2;${r};${g};${b}m`;
+const fg256 = (c: Rgb) => `\x1b[38;5;${rgbTo256(c)}m`;
+const bg256 = (c: Rgb) => `\x1b[48;5;${rgbTo256(c)}m`;
 
 /** A QR for `text` as a string of terminal lines. Colorful by default. */
 export function renderQr(text: string, opts: QrOptions = {}): string {
@@ -100,6 +117,9 @@ export function renderQr(text: string, opts: QrOptions = {}): string {
 
   const total = size + margin * 2;
   const sameRgb = (a: Rgb, b: Rgb) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+  const truecolor = opts.colorDepth === "truecolor";
+  const fg = truecolor ? fgTrue : fg256;
+  const bg = truecolor ? bgTrue : bg256;
 
   const lines: string[] = [];
   for (let r = 0; r < total; r += 2) {
