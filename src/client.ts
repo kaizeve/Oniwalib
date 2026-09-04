@@ -449,6 +449,25 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     qrTimer = undefined;
   };
 
+  // Keepalive-ping. Precisa rodar JÁ no fim do handshake Noise — não só depois do
+  // <success> —, senão o servidor derruba o stream com <stream:error>[ping] a
+  // cada ~30s enquanto o QR está na tela, e o QR reinicia junto (janela curta
+  // demais para escanear de um `pm2 logs`). Idempotente.
+  function startKeepAlive(): void {
+    if (keepAlive) return;
+    keepAlive = setInterval(() => {
+      try {
+        send(
+          node("iq", { to: S_WHATSAPP_NET, type: "get", xmlns: "w:p", id: genId() }, [
+            node("ping", {}),
+          ]),
+        );
+      } catch {
+        /* conexão caiu — o onClose cuida da reconexão */
+      }
+    }, keepAliveMs);
+  }
+
   const teardown = () => {
     clearTimers();
     failPendingIq("conexão reiniciada antes da resposta do <iq>");
@@ -936,17 +955,7 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
       }
     }
 
-    keepAlive = setInterval(() => {
-      try {
-        send(
-          node("iq", { to: S_WHATSAPP_NET, type: "get", xmlns: "w:p", id: genId() }, [
-            node("ping", {}),
-          ]),
-        );
-      } catch {
-        /* conexão caiu — o onClose cuida da reconexão */
-      }
-    }, keepAliveMs);
+    startKeepAlive(); // já pode estar rodando desde o fim do handshake
 
     // Repõe pré-chaves uma vez por processo — mas SÓ se o servidor de fato
     // estiver baixo (`onEncryptNotification` pergunta o `<count>` antes e tem
@@ -1148,6 +1157,9 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
         // handshake Noise OK. Agora esperamos <pair-device> ou <success>.
         // Não emitimos "open" aqui — só depois do <success> do WhatsApp.
         if (!expectRestart) retries = 0;
+        // Começa o keepalive JÁ: sem ele o servidor mata o stream ([ping]) a
+        // cada ~30s durante a espera do QR e o QR reinicia junto.
+        startKeepAlive();
       })
       .catch((e) => {
         connecting = false;
