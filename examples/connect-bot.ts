@@ -49,6 +49,49 @@ console.log(
 
 const bot = new OniBot({ name: "oni" });
 bot.register("coffee", "☕ (exemplo de comando custom)", () => "☕ aqui está");
+
+// ---- console "card" por mensagem recebida -------------------------------
+// Bloco formatado no terminal a cada mensagem (nome do bot / grupo / usuário /
+// texto / uptime / data). `ONI_BOT_NAME` troca o rótulo. `ONI_CARD=off` desliga.
+const BOOT_AT = Date.now();
+const BOT_NAME = process.env.ONI_BOT_NAME ?? "oni";
+const CARD_ON = process.env.ONI_CARD !== "off";
+const groupNameCache = new Map<string, string>();
+const toMono = (s: string): string =>
+  s.replace(/[A-Za-z0-9]/g, (ch) => {
+    const c = ch.charCodeAt(0);
+    if (c >= 65 && c <= 90) return String.fromCodePoint(0x1d670 + (c - 65)); // A-Z
+    if (c >= 97 && c <= 122) return String.fromCodePoint(0x1d68a + (c - 97)); // a-z
+    return String.fromCodePoint(0x1d7f6 + (c - 48)); // 0-9
+  });
+const hms = (ms: number): string => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(Math.floor(s / 3600))}:${p(Math.floor((s % 3600) / 60))}:${p(s % 60)}`;
+};
+const dmy = (unixSec: number): string => {
+  const d = new Date((unixSec || Math.floor(Date.now() / 1000)) * 1000);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${p(d.getFullYear() % 100)}`;
+};
+function msgCard(o: { group?: string; user: string; text: string; ts: number }): void {
+  if (!CARD_ON) return;
+  const row = (k: string, v: string) => ` ⪼ ${toMono(k)}: ${v}`;
+  const out = [
+    "",
+    ` ${toMono(o.group ? "NEW MESSAGE OF GROUP" : "NEW MESSAGE PRIVATE")} `,
+    row("BOT NAME", BOT_NAME),
+  ];
+  if (o.group) out.push(row("NAME OF GROUP", o.group));
+  out.push(
+    row("USER", o.user),
+    row("MESSAGE", o.text.replace(/\s+/g, " ").trim().slice(0, 400)),
+    row("UPTIME", hms(Date.now() - BOOT_AT)),
+    row("DATE", dmy(o.ts)),
+    "",
+  );
+  console.log(out.join("\n"));
+}
 // Manda !buttons / !list / !table de outro número para testar os tipos ricos.
 
 // maxRetries alto: para um bot que fica no ar, quedas transitórias devem
@@ -565,7 +608,26 @@ conn.events.on("messages.upsert", ({ messages }) => {
     // isso sozinha ao decifrar a stanza (`noteContact`); a chamada aqui é só
     // para o caso de a mensagem ter vindo por outro caminho.
     if (!inGroup && isPerson(from)) void conn.noteContact(from);
-    console.log(`← ${inGroup ? `[grupo ${from}] ` : ""}${m.pushName ?? from}: ${text}`);
+
+    let groupName: string | undefined;
+    if (inGroup) {
+      if (!groupNameCache.has(from)) {
+        groupNameCache.set(from, from); // placeholder até o metadata voltar
+        void conn
+          .groupMetadata(from)
+          .then((md) => {
+            if (md?.subject) groupNameCache.set(from, md.subject);
+          })
+          .catch(() => {});
+      }
+      groupName = groupNameCache.get(from);
+    }
+    msgCard({
+      group: groupName,
+      user: m.pushName ?? m.key.participant ?? from,
+      text,
+      ts: Number(m.messageTimestamp) || 0,
+    });
 
     // Grupo: respondemos com sender key (skmsg) + distribuição do NOSSO SKDM
     // 1:1 para quem já tem sessão pairwise com a gente. Quem nunca falou no
