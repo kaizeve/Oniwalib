@@ -45,7 +45,8 @@
   "author": "loveless",
   "license": "SEE LICENSE IN LICENSE",
   "dependencies": {
-    "curve25519-js": "^0.0.4"
+    "curve25519-js": "^0.0.4",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "qrcode-terminal": "^0.12.0"

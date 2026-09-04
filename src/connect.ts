@@ -12,7 +12,7 @@ import { b64 } from "./auth/state";
 import { NoiseSocket } from "./noise/socket";
 import type { Transport } from "./transport/types";
 import { WA_WS_ENDPOINT, WA_WS_ORIGIN, type Connector } from "./transport/types";
-import { WebSocketTransport } from "./transport/websocket";
+import { wsConnector } from "./transport/ws-connector";
 import { STOCK, type ClientProfile } from "./profiles/index";
 import { buildClientPayload } from "./proto/handshake";
 import { encodeClientPayload, encodeDeviceProps } from "./proto/client-payload";
@@ -30,7 +30,8 @@ export interface ConnectOptions {
   /** Fixa a versão do protocolo. Sem isto, `resolveOniVersion()`. */
   version?: OniVersion;
   url?: string;
-  /** Conector de transporte. Default: `WebSocketTransport.connect` (bun/node). */
+  /** Conector de transporte. Default: `wsConnector` — usa o pacote `ws` (node
+   *  após `npm install`, bun, RTS) e cai no `WebSocket` global se não achar. */
   connector?: Connector;
   countryCode?: string;
   timeout?: number;
@@ -66,7 +67,7 @@ export async function connectOni(opts: ConnectOptions): Promise<Connection> {
     countryCode: opts.countryCode,
   });
 
-  const connect = opts.connector ?? WebSocketTransport.connect;
+  const connect = opts.connector ?? wsConnector;
   const transport = await connect({
     url: opts.url ?? WA_WS_ENDPOINT,
     origin: WA_WS_ORIGIN,

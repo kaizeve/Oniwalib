@@ -52,6 +52,7 @@ export {
   type PairDeviceRefs,
 } from "./connect";
 export { WebSocketTransport } from "./transport/websocket";
+export { wsConnector } from "./transport/ws-connector";
 export { encodeDeviceProps } from "./proto/client-payload";
 
 export {

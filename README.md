@@ -9,7 +9,7 @@ It talks the socket directly — no browser, no Puppeteer, no headless Chrome.
 
 <br>
 
-[![tests](https://img.shields.io/badge/tests-1025%2F1025%20passing-2ea44f?style=flat-square)](#tests)
+[![tests](https://img.shields.io/badge/tests-1040%2F1040%20passing-2ea44f?style=flat-square)](#tests)
 [![runtimes](https://img.shields.io/badge/runs%20on-bun%20%C2%B7%20node%20%C2%B7%20RTS-0b7285?style=flat-square)](#status)
 [![language](https://img.shields.io/badge/TypeScript-3178c6?style=flat-square&logo=typescript&logoColor=white)](#)
 [![status](https://img.shields.io/badge/status-early%20%C2%B7%20foundation-d9822b?style=flat-square)](#status)
@@ -107,19 +107,21 @@ app-state sync and the rest of the surface in [`docs/API.md`](docs/API.md). A
 reference bot (`examples/connect-bot.ts`) has been running against a live
 account under `pm2` throughout development.
 
-On **RTS** the whole library compiles and runs green (`rts run` / `rts test`),
-**and `rts compile src/index.ts` now produces a native ELF binary** that runs
-the crypto / codec / Signal / store paths — module-graph AOT landed
-([#2611](https://github.com/UrubuCode/rts/issues/2611), with
+On **RTS**: the whole library compiles and runs green (`rts run` / `rts test`);
+`rts compile src/index.ts` produces a **native ELF binary** (module-graph AOT
+landed — [#2611](https://github.com/UrubuCode/rts/issues/2611), with
 [#2612](https://github.com/UrubuCode/rts/issues/2612) /
-[#2617](https://github.com/UrubuCode/rts/issues/2617) fixed alongside). What's
-left for a native binary that *connects* is the RTS transport connector (TLS +
-WebSocket) — `node:tls` / `node:net` / `ws` are now available on the engine, so
-it's writable. Consuming oniwalib on RTS is by vendored source today;
+[#2617](https://github.com/UrubuCode/rts/issues/2617) fixed alongside); and the
+default `wsConnector` **connects to WhatsApp for real on the engine** —
+`connectOni` runs the full transport → Noise XX handshake → first stanza against
+`wss://web.whatsapp.com` on RTS (`node:tls` / `node:net` / `ws` are all present).
+Two things left on RTS: `openWhatsApp`'s reconnect/keepalive loop hits an
+async-scheduler edge (the lower-level `connectOni` is fine), and
 `import "oniwalib"` from `node_modules` waits on the engine's bare-specifier
-resolver ([#2625](https://github.com/UrubuCode/rts/issues/2625)).
+resolver ([#2625](https://github.com/UrubuCode/rts/issues/2625)) — vendor the
+source for now.
 
-Suite: **1025 / 1025 on bun**, **green on RTS** (`rts run` / `rts test`).
+Suite: **1040 / 1040 on bun**, **green on RTS** (`rts run` / `rts test`).
 `client` and `file-state` skip themselves on the engine — the first drives the
 whole connection over the mock transport and hits an RTS async-scheduler edge,
 the second is node-only persistence with a `node:fs` sequencing edge; neither is
@@ -145,10 +147,11 @@ in the library's path.
 | `business/` | Business read — `getBusinessProfile` / `getCatalog` / `getCollections` / `getOrderDetails` | ✅ | ✅ |
 | `store/` | `makeInMemoryStore` — chats / contacts / messages / presence / group meta / labels / poll votes, `toJSON`/`fromJSON` | ✅ | ✅ |
 | `notifications.ts` · `events/` · `profiles/` | `<notification>` → `contacts.update`; typed event surface; stock vs modified fingerprint | ✅ | ✅ |
-| `transport/` | `Transport` interface + `MockTransport` + `WebSocketTransport` (bun/node); RTS TLS/WS connector | ✅ | 🚧³ |
+| `transport/` | `Transport` interface + `MockTransport` + `wsConnector` (default — `ws` package, falls back to the global `WebSocket`) | ✅ | ✅³ |
 
-<sub>³ RTS now has `node:net` / `node:tls` / `node:http` / `node:zlib` and `ws`;
-the RTS connector is the next piece for a native binary that connects live.</sub>
+<sub>³ `wsConnector` connects on RTS via `ws` over `node:tls` / `node:net`;
+`connectOni` completes the Noise handshake against live WhatsApp on the engine.
+`openWhatsApp`'s reconnect loop still hits an RTS async edge — see above.</sub>
 
 <sub>¹ `test/file-state.test.ts` red on RTS — an `ENOENT` on a freshly written
 file mid-test; each `node:fs` call works in isolation, so a sequencing edge in
@@ -222,7 +225,7 @@ community via `<parent>` / `<linked_parent>`) · `reaction` 19
 revoke → `messages.delete`; `sendReaction` encrypted back) · `pairing` 18 (the
 `<pair-success>` crypto both directions) ·
 `client` 18 (QR → pairing → `515` restart → login `<success>`, over the mock
-server) → **1025 / 1025 on bun**.
+server) → **1040 / 1040 on bun**.
 
 ### <a name="oni-version"></a>Keeping it working — the oni-version
 
