@@ -62,6 +62,9 @@ const conn = openWhatsApp({
   countryCode: "BR",
   maxRetries: 1_000_000,
   autoDownloadMedia: true, // mídia recebida já chega baixada em `messages.media`
+  // QR fica parado mais tempo — mais fácil de escanear de um `pm2 logs`.
+  // `ONI_QR_MS=90000 npm run bot:restart` pra ajustar.
+  qrTimeoutMs: Number(process.env.ONI_QR_MS) || 90_000,
 });
 
 conn.events.on("messages.media", ({ key, media, error }) => {
@@ -491,6 +494,24 @@ conn.events.on("poll.update", (evt) => {
 
 // Recusa chamadas automaticamente (ligue com ONI_REJECT_CALLS=1).
 const rejectCalls = process.env.ONI_REJECT_CALLS === "1";
+// Diagnóstico: ONI_DEBUG_RECV=1 loga todo stanza cru que entra + eventos de
+// app-state / history. Tirar depois de validar.
+if (process.env.ONI_DEBUG_RECV === "1") {
+  conn.events.on("node.recv", (n) => {
+    const kids = Array.isArray(n.content) ? (n.content as any[]).map((c) => c.tag).join(",") : "";
+    console.log(`⟳ <${n.tag}${n.attrs?.type ? ` type=${n.attrs.type}` : ""}${n.attrs?.from ? ` from=${n.attrs.from}` : ""}>${kids ? ` [${kids}]` : ""}`);
+  });
+  conn.events.on("messaging-history.set", (h) => {
+    console.log(`📚 history ${h.syncType ?? "?"} — ${h.chats.length} chat(s), ${h.messages?.length ?? 0} msg(s), ${h.contacts.length} contato(s), progress ${h.progress ?? "?"}`);
+  });
+  conn.events.on("contacts.upsert", (cs) => console.log(`👤 contacts.upsert × ${cs.length}`));
+  conn.events.on("chats.update", (cs) => console.log(`💬 chats.update:`, JSON.stringify(cs).slice(0, 200)));
+  conn.events.on("creds.update", (c) => {
+    const k = Object.keys(c);
+    if (k.includes("myAppStateKeyId") || k.some((x) => x === "me")) console.log(`🔑 creds.update:`, k.join(","));
+  });
+}
+
 conn.events.on("call", (calls) => {
   for (const c of calls) {
     if (c.status !== "offer") continue;

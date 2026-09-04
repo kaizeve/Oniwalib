@@ -60,6 +60,15 @@ be called out here and announced on the
   Handles both `.on(...)` and `.addEventListener` event styles and normalizes
   `Buffer` / `ArrayBuffer` / string payloads. `makeWsConnector(getCtor)` for
   injection. `ws` added to `dependencies`.
+- **RTS runtime support** — `openWhatsApp` now connects live on RTS.
+  `conn.start()` (awaitable, idempotent — the handshake promise) and
+  `conn.waitUntilClose()` (keep-alive loop + keepalive-ping when `setInterval`
+  doesn't run) are the RTS entrypoint: `await conn.start(); await
+  conn.waitUntilClose();`. Auto-start is deferred a microtask so an explicit
+  `conn.start()` wins the chain. `resolveOniVersion()` skips the network fetch on
+  RTS (it blocks the engine loop and fails slowly) and never lets a `fetch`
+  throw escape — falls back to the built-in / cache. `examples/bot-rts.ts` is a
+  runnable RTS bot.
 - **RTS** — `crypto` closed on the engine (XEdDSA, X25519, `inflate`);
   `RTS_GAPS` empty. Three engine bugs found while porting, filed, and **fixed
   upstream**: `#2611` (module-graph AOT), `#2612` (regex `[`), `#2617`

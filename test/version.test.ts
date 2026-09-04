@@ -78,6 +78,7 @@ async function parseSources() {
 
       const store = memoryVersionStore();
       const r = await resolveOniVersion({
+        fetch: true, // força a busca (o default pula no RTS)
         store,
         sources: ["https://example.test/oni-version.json"],
       });
@@ -114,12 +115,35 @@ function buildHash() {
   }
 }
 
+async function fetchDefaultsOffOnRts() {
+  // `fetch` explícito manda; sem ele, o default (que pula no RTS) é o que vale.
+  // Simula o "RTS" pondo o marcador e um `fetch` que EXPLODE — resolve tem que
+  // cair na embutida sem chamar o fetch.
+  const g = globalThis as any;
+  const hadMarker = "__rtsFetchText" in g;
+  const realFetch = g.fetch;
+  g.__rtsFetchText = g.__rtsFetchText ?? (() => "");
+  g.fetch = () => {
+    throw new Error("fetch não devia ter sido chamado");
+  };
+  try {
+    const r = await resolveOniVersion({}); // sem opts.fetch
+    ok("RTS: pula o fetch, source=default", r.source === "default");
+    const forced = await resolveOniVersion({ fetch: false });
+    ok("fetch:false explícito também", forced.source === "default");
+  } finally {
+    g.fetch = realFetch;
+    if (!hadMarker) delete g.__rtsFetchText;
+  }
+}
+
 await orderOverride();
 await orderDefault();
 await orderCache();
 await orderOverrideBeatsCache();
 await parseSources();
 await deadSourceFallsThrough();
+await fetchDefaultsOffOnRts();
 buildHash();
 
 const rt =

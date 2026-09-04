@@ -63,13 +63,39 @@ export async function resolveOniVersion(opts: ResolveOptions = {}): Promise<Reso
     return { version: normalize(opts.override), source: "override" };
   }
 
-  const cached = await opts.store?.get();
-  const wantFetch = opts.fetch ?? typeof (globalThis as { fetch?: unknown }).fetch === "function";
+  let cached: OniVersion | undefined;
+  try {
+    cached = await opts.store?.get();
+  } catch {
+    /* store quebrado — ignora */
+  }
+  // No RTS o `fetch` bloqueia o event-loop e falha devagar (3 fontes × ~15s) —
+  // isso adia o `openWhatsApp` em ~45s. Pula a busca e usa a embutida
+  // (`oni-version.json` mantém a default fresca; um binário nativo carrega a que
+  // foi compilada). Force com `{ fetch: true }` se precisar.
+  const isRts =
+    typeof (globalThis as any).Bun === "undefined" &&
+    typeof (globalThis as any).__rtsFetchText !== "undefined";
+  const wantFetch =
+    opts.fetch ??
+    (!isRts && typeof (globalThis as { fetch?: unknown }).fetch === "function");
 
   if (wantFetch) {
-    const latest = await fetchLatestOniVersion(opts.sources);
+    // NUNCA deixa um `fetch` estourar aqui: no RTS ele pode lançar
+    // (`fetch: … falhou` / `String.prototype … on null`) e isso derrubaria o
+    // `openWhatsApp` inteiro. Qualquer erro → cai pro cache / embutida.
+    let latest: OniVersion | undefined;
+    try {
+      latest = await fetchLatestOniVersion(opts.sources);
+    } catch {
+      latest = undefined;
+    }
     if (latest) {
-      await opts.store?.set(latest);
+      try {
+        await opts.store?.set(latest);
+      } catch {
+        /* ignora */
+      }
       return { version: latest, source: "fetch" };
     }
   }
@@ -81,6 +107,27 @@ export async function resolveOniVersion(opts: ResolveOptions = {}): Promise<Reso
 }
 
 /** Busca a versão mais nova conhecida. `undefined` se nada respondeu. */
+/** ms para desistir de CADA fonte. Sem isto, um `fetch` que pendura (visto no
+ *  RTS contra `raw.githubusercontent`) trava a resolução de versão inteira e,
+ *  com ela, o `openWhatsApp`. */
+const FETCH_TIMEOUT_MS = 6000;
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("fetch timeout")), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e as Error);
+      },
+    );
+  });
+}
+
 export async function fetchLatestOniVersion(
   sources: readonly string[] = DEFAULT_SOURCES,
 ): Promise<OniVersion | undefined> {
@@ -89,13 +136,16 @@ export async function fetchLatestOniVersion(
 
   for (const url of sources) {
     try {
-      const res = await f(url, { headers: { "user-agent": "oniwalib" } });
+      const res = await withTimeout(
+        f(url, { headers: { "user-agent": "oniwalib" } }),
+        FETCH_TIMEOUT_MS,
+      );
       if (!res.ok) continue;
-      const body = await res.text();
+      const body = await withTimeout(res.text(), FETCH_TIMEOUT_MS);
       const parsed = url.endsWith(".json") ? parseJson(body) : parseWhatsAppWeb(body);
       if (parsed) return parsed;
     } catch {
-      // rede/CORS/parse — tenta a próxima fonte
+      // rede/CORS/parse/timeout — tenta a próxima fonte
     }
   }
   return undefined;

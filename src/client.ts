@@ -389,6 +389,15 @@ export interface OniConnection {
   getOrderDetails(orderId: string, tokenBase64: string): Promise<OrderDetails>;
   /** Fecha e não reconecta. */
   end(err?: Error): void;
+  /** A conexão já é iniciada sozinha. Chame (e `await`) isto quando precisar de
+   *  uma cadeia `await` explícita do handshake — **obrigatório no RTS**, onde
+   *  `rts run` não agenda o `start()` disparado internamente. Idempotente:
+   *  devolve a promessa do handshake em voo. */
+  start(): Promise<void>;
+  /** Segura o processo (loop `await`) até fechar, e faz o keepalive-ping quando
+   *  `setInterval` não roda (RTS). Em bun/node é opcional. Padrão de bot no RTS:
+   *  `await conn.start(); await conn.waitUntilClose();`. */
+  waitUntilClose(): Promise<void>;
   readonly state: "connecting" | "open" | "close";
 }
 
@@ -414,6 +423,10 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
   let unbind: Array<() => void> = [];
   let keepAlive: ReturnType<typeof setInterval> | undefined;
   let qrTimer: ReturnType<typeof setTimeout> | undefined;
+  /** A promessa do handshake em voo (ou o último). `conn.start()` a devolve, o
+   *  que dá ao runtime do RTS uma cadeia `await` para bombear (o `start()`
+   *  disparado sozinho fica órfão e o `rts run` não o agenda). */
+  let connectPromise: Promise<void> = Promise.resolve();
 
   // `<iq>` à espera de resposta, por id. Resolvido no `<iq type=result|error>`
   // com o mesmo id (ver `handleNode`), ou rejeitado no timeout / teardown.
@@ -1101,11 +1114,11 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     setTimeout(start, wait);
   };
 
-  const start = () => {
-    if (stopped || connecting) return;
+  const start = (): Promise<void> => {
+    if (stopped || connecting) return connectPromise;
     connecting = true;
 
-    connectOni({
+    connectPromise = connectOni({
       auth,
       profile: opts.profile,
       version: opts.version,
@@ -1142,6 +1155,33 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
         reconnect();
         void e;
       });
+    return connectPromise;
+  };
+
+  /** Mantém o processo vivo (loop `await sleep`) até `state === "close"`.
+   *  Necessário no RTS, onde `rts run` sai quando a fila de tarefas drena e não
+   *  agenda `setInterval`; em bun/node é opcional (o socket já segura o loop).
+   *  Faz também o keepalive-ping quando o `setInterval` não roda. */
+  const waitUntilClose = async (): Promise<void> => {
+    const step = Math.max(1000, Math.floor((opts.keepAliveMs ?? 25000) / 2));
+    let sinceLastPing = 0;
+    while (!stopped && state !== "close") {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => setTimeout(r, step));
+      sinceLastPing += step;
+      if (state === "open" && !keepAlive && sinceLastPing >= (opts.keepAliveMs ?? 25000)) {
+        sinceLastPing = 0;
+        try {
+          send(
+            node("iq", { to: S_WHATSAPP_NET, type: "get", xmlns: "w:p", id: genId() }, [
+              node("ping", {}),
+            ]),
+          );
+        } catch {
+          /* caiu — o onClose cuida */
+        }
+      }
+    }
   };
 
   // `assertGroupSessions` = `resolveGroupDeviceJids` (metadata + USYNC, cacheado,
@@ -1156,7 +1196,18 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     return { opened: targets.length - stillMissing.length, missing: stillMissing.length };
   };
 
-  start();
+  // Auto-conecta, mas adiado por um microtask: assim um chamador que faça
+  // `const c = openWhatsApp(...); await c.start();` roda o handshake DENTRO da
+  // própria cadeia `await` (o RTS precisa disso — não bombeia um `start()`
+  // órfão). Em bun/node o microtask dispara sozinho e nada muda.
+  let autoStarted = false;
+  const autoStart = () => {
+    if (autoStarted || stopped || connecting) return;
+    autoStarted = true;
+    void start();
+  };
+  if (typeof queueMicrotask === "function") queueMicrotask(autoStart);
+  else Promise.resolve().then(autoStart);
 
   return {
     events,
@@ -1314,6 +1365,8 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     readMessages,
     sendReceipt,
     end,
+    start,
+    waitUntilClose,
     get state() {
       return state;
     },

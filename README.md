@@ -9,7 +9,7 @@ It talks the socket directly — no browser, no Puppeteer, no headless Chrome.
 
 <br>
 
-[![tests](https://img.shields.io/badge/tests-1040%2F1040%20passing-2ea44f?style=flat-square)](#tests)
+[![tests](https://img.shields.io/badge/tests-1042%2F1042%20passing-2ea44f?style=flat-square)](#tests)
 [![runtimes](https://img.shields.io/badge/runs%20on-bun%20%C2%B7%20node%20%C2%B7%20RTS-0b7285?style=flat-square)](#status)
 [![language](https://img.shields.io/badge/TypeScript-3178c6?style=flat-square&logo=typescript&logoColor=white)](#)
 [![status](https://img.shields.io/badge/status-early%20%C2%B7%20foundation-d9822b?style=flat-square)](#status)
@@ -107,21 +107,22 @@ app-state sync and the rest of the surface in [`docs/API.md`](docs/API.md). A
 reference bot (`examples/connect-bot.ts`) has been running against a live
 account under `pm2` throughout development.
 
-On **RTS**: the whole library compiles and runs green (`rts run` / `rts test`);
-`rts compile src/index.ts` produces a **native ELF binary** (module-graph AOT
-landed — [#2611](https://github.com/UrubuCode/rts/issues/2611), with
+**On RTS it connects to WhatsApp for real too.** `rts run examples/bot-rts.ts`
+opens the socket over the engine's `node:tls` / `ws`, runs the full Noise XX
+handshake, and prints a pairing QR. `rts compile src/index.ts` produces a
+**native ELF binary** (module-graph AOT landed —
+[#2611](https://github.com/UrubuCode/rts/issues/2611), with
 [#2612](https://github.com/UrubuCode/rts/issues/2612) /
-[#2617](https://github.com/UrubuCode/rts/issues/2617) fixed alongside); and the
-default `wsConnector` **connects to WhatsApp for real on the engine** —
-`connectOni` runs the full transport → Noise XX handshake → first stanza against
-`wss://web.whatsapp.com` on RTS (`node:tls` / `node:net` / `ws` are all present).
-Two things left on RTS: `openWhatsApp`'s reconnect/keepalive loop hits an
-async-scheduler edge (the lower-level `connectOni` is fine), and
-`import "oniwalib"` from `node_modules` waits on the engine's bare-specifier
-resolver ([#2625](https://github.com/UrubuCode/rts/issues/2625)) — vendor the
-source for now.
+[#2617](https://github.com/UrubuCode/rts/issues/2617) fixed alongside). The RTS
+entrypoint is explicit — `await conn.start(); await conn.waitUntilClose();` —
+because `rts run` drains its task queue and exits without a `setInterval`, so the
+connect chain must be awaited and the process held open by a loop; bun/node don't
+need it. Open on RTS: `import "oniwalib"` from `node_modules`
+([#2625](https://github.com/UrubuCode/rts/issues/2625)) — vendor the source; and
+a persisted auth store (`fileAuthState` is node-only for now — persist
+`creds.update` yourself and rebuild `memoryAuthState(creds)`).
 
-Suite: **1040 / 1040 on bun**, **green on RTS** (`rts run` / `rts test`).
+Suite: **1042 / 1042 on bun**, **green on RTS** (`rts run` / `rts test`).
 `client` and `file-state` skip themselves on the engine — the first drives the
 whole connection over the mock transport and hits an RTS async-scheduler edge,
 the second is node-only persistence with a `node:fs` sequencing edge; neither is
@@ -191,7 +192,7 @@ end to end there today — see
 
 ### <a name="tests"></a>Tests
 
-`version` 11 · `wire` 31 (protobuf codec + `HandshakeMessage` / `ClientPayload`)
+`version` 13 · `wire` 31 (protobuf codec + `HandshakeMessage` / `ClientPayload`)
 · `wabinary` 29 · `jid` 20 (`jidKind` — user / group·community / channel
 `@newsletter` / status / broadcast / lid / bot) · `e2e-message` 68 · `crypto` 19 (node/rts adapter parity —
 hash/HMAC/HKDF/AES-GCM/CBC — plus XEdDSA sign/verify: round-trip, tamper
@@ -225,7 +226,7 @@ community via `<parent>` / `<linked_parent>`) · `reaction` 19
 revoke → `messages.delete`; `sendReaction` encrypted back) · `pairing` 18 (the
 `<pair-success>` crypto both directions) ·
 `client` 18 (QR → pairing → `515` restart → login `<success>`, over the mock
-server) → **1040 / 1040 on bun**.
+server) → **1042 / 1042 on bun**.
 
 ### <a name="oni-version"></a>Keeping it working — the oni-version
 
@@ -303,6 +304,16 @@ conn.events.on("messages.upsert", async ({ type, messages }) => {
 First run prints a QR (or use `countryCode` + the `pairingCode` on
 `connection.update` for a pairing code). The session caches in the auth store —
 reconnects don't re-pair.
+
+**On RTS**, drive it explicitly (see `examples/bot-rts.ts`):
+
+```ts
+const conn = openWhatsApp({ auth, saveCreds });
+conn.events.on("connection.update", …);
+conn.events.on("messages.upsert", …);
+await conn.start();          // run the connect chain in an awaited context
+await conn.waitUntilClose(); // hold the process open + keepalive-ping
+```
 
 ### Build a message with buttons
 
