@@ -58,6 +58,16 @@ be called out here and announced on the
   `RTS_GAPS` empty. Engine quirks worked around in source and reported upstream
   (`UrubuCode/rts#2611`, `#2612`, `#2617`).
 
+### Packaging
+- Cross-runtime `exports`: **bun** and **RTS** resolve `import "oniwalib"` to
+  `src/index.ts` (TypeScript, no build); **node** resolves to `dist/index.js` — a
+  single bundled ESM file (`bun run build`, run automatically on `prepack`) with
+  `node:*` external and everything else (incl. `curve25519-js`) inlined.
+- `files` whitelist — the tarball is `src` + `dist` + `docs` + metadata (~260 KiB,
+  was ~1.7 MB); tests / examples / scripts / the banner no longer ship.
+- `npm run smoke` — packs the library and imports it by package name from a clean
+  consumer under node and bun; the deploy gate.
+
 ### Fixed
 - Pre-key upload loop that walked `nextPreKeyId` into the thousands and froze the
   bot — now a `<count>` check + low-watermark + rate limit.

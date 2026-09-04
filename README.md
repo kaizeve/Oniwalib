@@ -239,6 +239,24 @@ const { version, source } = await resolveOniVersion();   // e.g. [2, 3000, 10232
 
 ---
 
+## Install
+
+```bash
+bun  add oniwalib        # or: git clone … && bun install
+npm  install oniwalib
+```
+
+`import { openWhatsApp } from "oniwalib"` resolves per runtime:
+
+| Runtime | Entry | Notes |
+|---|---|---|
+| **bun** | `src/index.ts` (the `"bun"` export condition) | runs the TypeScript directly, no build |
+| **node** | `dist/index.js` | a single bundled ESM file (`bun run build`, auto on `prepack`); `node:*` builtins external, everything else inlined |
+| **RTS** | `src/index.ts` | `rts run` / `rts test` compile the module graph; a checkout is the usual mode |
+
+`npm run smoke` packs the library and imports it by name from a clean consumer
+under node **and** bun — the deploy gate.
+
 ## Usage
 
 **Full method + event reference: [`docs/API.md`](docs/API.md).**
