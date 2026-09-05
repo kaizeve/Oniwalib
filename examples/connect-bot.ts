@@ -47,7 +47,8 @@ console.log(
     (auth.creds.registered ? `registrado como ${auth.creds.me?.id}` : "não registrado"),
 );
 
-const bot = new OniBot({ name: "oni" });
+const PREFIX = process.env.ONI_PREFIX ?? "-";
+const bot = new OniBot({ name: "oni", prefix: PREFIX });
 bot.register("coffee", "☕ (exemplo de comando custom)", () => "☕ aqui está");
 
 // ---- console "card" por mensagem recebida -------------------------------
@@ -586,8 +587,8 @@ conn.events.on("connection.update", (u) => {
   if (u.isNewLogin) console.log(`\n✅ pareado! device = ${auth.creds.me?.id}`);
   if (u.connection === "open") {
     console.log(`\n🟢 conectado como ${auth.creds.me?.id}`);
-    console.log(`   comandos: ${bot.commandNames.map((n) => "!" + n).join(" ")}`);
-    console.log("   manda um !ping de outro número…");
+    console.log(`   comandos: ${bot.commandNames.map((n) => PREFIX + n).join(" ")}`);
+    console.log(`   manda um ${PREFIX}ping de outro número…`);
   }
   if (u.connection === "close") {
     // Com maxRetries alto, só chega aqui em logout de verdade (sessão morta).
