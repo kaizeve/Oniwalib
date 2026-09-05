@@ -10,6 +10,8 @@ be called out here and announced on the
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-05
+
 ### Added
 - **Live connection on bun / node** — `openWhatsApp` pairs (QR + code), logs in,
   survives `515` restart, keeps alive, and drives the full message / presence /

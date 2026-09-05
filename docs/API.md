@@ -1,6 +1,6 @@
 # OniWaLib — API reference
 
-`v0.1.0` · every method on the connection returned by `openWhatsApp(...)`, the
+`v0.2.0` · every method on the connection returned by `openWhatsApp(...)`, the
 events it emits, and the option bags. Types live in `src/` — this is the map.
 
 Descriptions are condensed from the source doc-comments; when in doubt the
@@ -259,7 +259,59 @@ Needs the primary device to have shared the app-state sync keys — check
 | `poll.update` | `{ key, pollUpdateMessageKey, vote, senderTimestampMs }` — decrypt with `readPollVote` |
 | `call` | `WACall[]` |
 | `blocklist.update` | `{ blocklist, action?: "add" \| "remove" }` |
+| `messaging-history.set` | `{ chats, contacts, messages, syncType?, progress?, isLatest? }` — arrives in chunks after pairing; `messages` needs `historyMessages: true` |
 | `node.recv` / `node.send` | raw `BinaryNode` — every stanza in / out |
+
+---
+
+## Running on RTS
+
+`openWhatsApp` connects on its own on bun/node. On RTS the engine doesn't pump
+an internally-fired `start()` by itself, so drive it explicitly:
+
+```ts
+const conn = openWhatsApp({ auth, connector: wsConnector });
+await conn.start();          // awaitable, idempotent — returns the in-flight handshake promise
+await conn.waitUntilClose(); // holds the process; also runs the keepalive ping (RTS has no setInterval loop)
+```
+
+| member | what |
+|---|---|
+| `conn.start()` | `Promise<void>` — await the handshake explicitly. Optional on bun/node, **required on RTS** |
+| `conn.waitUntilClose()` | `Promise<void>` — blocks until the connection closes; ticks the keepalive itself on engines without a real `setInterval` |
+
+`wsConnector` (from `"oniwalib"`) is the default `Connector` — a real `wss://`
+client using the `ws` package when it resolves (node after `npm install ws`,
+bun, and RTS, where `ws` runs over the engine's `node:net`/`node:tls`), falling
+back to the global `WebSocket`.
+
+`resolveOniVersion()` skips its network fetch on RTS (blocks the engine loop)
+and falls back to the built-in version instead of throwing.
+
+`examples/bot-rts.ts` is a runnable RTS bot. Known gap: `import "oniwalib"` by
+bare package name doesn't resolve on RTS yet (`UrubuCode/rts#2625`) — import
+from `src/index.ts` relatively until that lands.
+
+---
+
+## Store
+
+`makeInMemoryStore()` binds to `conn.events` and keeps a live snapshot: chats,
+contacts, messages (by chat), presence, group metadata, labels, poll votes.
+
+```ts
+const store = makeInMemoryStore();
+store.bind(conn.events);
+// ...
+fs.writeFileSync("store.json", JSON.stringify(store.toJSON()));
+// later:
+store.fromJSON(JSON.parse(fs.readFileSync("store.json", "utf8")));
+```
+
+| method | what |
+|---|---|
+| `toJSON()` | a `StoreSnapshot` — plain, serializable |
+| `fromJSON(snap)` | replace the store's state with a snapshot |
 
 ---
 

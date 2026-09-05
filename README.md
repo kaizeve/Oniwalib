@@ -16,7 +16,7 @@ It talks the socket directly — no browser, no Puppeteer, no headless Chrome.
 [![license](https://img.shields.io/badge/license-restricted-c92a2a?style=flat-square)](LICENSE)
 [![channel](https://img.shields.io/badge/WhatsApp-official%20channel-25D366?style=flat-square&logo=whatsapp&logoColor=white)](https://whatsapp.com/channel/0029Vb93Ug3LI8YRuoroJd44)
 
-<sub>**OniWaLib** · `v0.1.0` · progress tracked separately from the RTS core · meet **Oni**, the mascot 👹 (a demon — but a friendly one)</sub>
+<sub>**OniWaLib** · `v0.2.0` · progress tracked separately from the RTS core · meet **Oni**, the mascot 👹 (a demon — but a friendly one)</sub>
 
 <sub>Official channel: **[whatsapp.com/channel/0029Vb93Ug3LI8YRuoroJd44](https://whatsapp.com/channel/0029Vb93Ug3LI8YRuoroJd44)** — releases, API changes, breaking-change notices.</sub>
 

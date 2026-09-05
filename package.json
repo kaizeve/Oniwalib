@@ -1,6 +1,6 @@
 {
   "name": "oniwalib",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "OniWaLib \u2014 a native WhatsApp Multi-Device client, built on RTS. Baileys-style: talks the socket directly, no browser.",
   "type": "module",
