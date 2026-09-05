@@ -47,7 +47,7 @@ console.log(
     (auth.creds.registered ? `registrado como ${auth.creds.me?.id}` : "não registrado"),
 );
 
-const PREFIX = process.env.ONI_PREFIX ?? "-";
+const PREFIX = process.env.ONI_PREFIX ?? "!";
 const bot = new OniBot({ name: "oni", prefix: PREFIX });
 bot.register("coffee", "☕ (exemplo de comando custom)", () => "☕ aqui está");
 
