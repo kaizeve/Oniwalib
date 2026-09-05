@@ -557,6 +557,21 @@ function bundleIq(remote: ReturnType<typeof memoryAuthState>, jid: string, otkPu
   const sk = getBinaryNodeChildren(gm, "enc").find((e) => e.attrs.type === "skmsg");
   const clear = decodeE2EMessage(unpad(groupDecrypt(C, rec, sk!.content as Uint8Array)));
   ok("grupo+groupDevices: membro novo decifra o texto", clear.conversation === "oi grupo", JSON.stringify(clear));
+
+  // 2ª msg: NÃO re-distribui (mem diz que o membro já tem a sender key)
+  gdSent.length = 0;
+  await gdLayer.sendMessage(G, { conversation: "segunda" });
+  const gm2 = gdSent.find((x) => x.tag === "message" && x.attrs.to === G);
+  ok("grupo: 2ª msg não re-fana o SKDM", !getBinaryNodeChild(gm2, "participants"));
+
+  // sender key ROTACIONADA (device novo / reviveqr): apaga o nosso record e o
+  // mem antigo tem que ser invalidado — redistribui pra todo mundo de novo.
+  await gdAuth.keys.set({ "sender-key": { [`${G}::5511333330000.0`]: null } });
+  gdSent.length = 0;
+  await gdLayer.sendMessage(G, { conversation: "pos-rotacao" });
+  const gm3 = gdSent.find((x) => x.tag === "message" && x.attrs.to === G);
+  const to3 = getBinaryNodeChildren(getBinaryNodeChild(gm3, "participants"), "to")[0];
+  ok("grupo: key nova → re-fana o SKDM pro membro", to3?.attrs.jid === NEW);
 }
 
 // --- grupo lid-addressed: <to> por @lid + addressing_mode=lid --------------

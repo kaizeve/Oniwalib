@@ -209,10 +209,16 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
   // guarda por grupo um mapa jid -> "já tem o nosso SKDM atual?" (à la Baileys).
   const groupPeers = new Map<string, Map<string, string>>();
 
-  type PeerMem = Record<string, boolean>;
+  // `jids` = jid -> "já tem o NOSSO sender key atual?". `keyId` amarra o mapa a
+  // uma sender key específica: se a nossa key mudou (device novo, rotação,
+  // reviveqr), o mapa velho não vale — todo mundo precisa receber o SKDM de novo,
+  // senão o cliente deles mostra "aguardando esta mensagem".
+  type PeerMem = { keyId: number; jids: Record<string, boolean> };
   const loadPeerMem = async (groupId: string): Promise<PeerMem> => {
     const { [groupId]: raw } = await auth.keys.get("sender-key-memory", [groupId]);
-    return (raw as PeerMem) ?? {};
+    if (raw && typeof raw === "object" && "jids" in (raw as object)) return raw as PeerMem;
+    // formato antigo (mapa jid->bool cru) ou vazio
+    return { keyId: 0, jids: (raw as Record<string, boolean>) ?? {} };
   };
   const savePeerMem = (groupId: string, mem: PeerMem): Promise<void> =>
     auth.keys.set({ "sender-key-memory": { [groupId]: mem } });
@@ -237,8 +243,8 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     if (m.get(addr) === jid) return;
     m.set(addr, jid);
     const mem = await loadPeerMem(groupId);
-    if (!(jid in mem)) {
-      mem[jid] = false;
+    if (!(jid in mem.jids)) {
+      mem.jids[jid] = false;
       await savePeerMem(groupId, mem);
     }
   }
@@ -913,12 +919,14 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
       const skdm = createSenderKeyDistribution(c, rec); // idempotente
       const skCipher = groupEncrypt(c, rec, pad(encodeE2EMessage(msg)));
       await storeSenderKey(recName, rec);
+      const curKeyId = rec.getState()?.keyId ?? 0;
 
       // Candidatos = cache em memória ∪ store durável ∪ devices resolvidos agora.
-      const mem = await loadPeerMem(groupJid);
+      let mem = await loadPeerMem(groupJid);
+      if (mem.keyId !== curKeyId) mem = { keyId: curKeyId, jids: {} }; // key nova → redistribui
       const candidates = new Map<string, string>(); // addr -> jid
       for (const [a2, j2] of groupPeers.get(groupJid) ?? []) candidates.set(a2, j2);
-      for (const j2 of [...Object.keys(mem), ...extraJids]) {
+      for (const j2 of [...Object.keys(mem.jids), ...extraJids]) {
         try {
           candidates.set(signalAddress(j2), j2);
         } catch {
@@ -940,7 +948,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
       let addressingMode: string | undefined;
       for (const [addr, jid] of candidates) {
         if (jid.endsWith("@lid")) addressingMode = "lid";
-        if (mem[jid] === true) continue; // já tem o nosso SKDM atual
+        if (mem.jids[jid] === true) continue; // já tem o nosso SKDM atual
         try {
           // eslint-disable-next-line no-await-in-loop
           const { type, body } = await signalEncrypt(deps, addr, skdmPlain);
@@ -948,7 +956,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
             node("to", { jid }, [node("enc", { v: "2", type: type === 3 ? "pkmsg" : "msg" }, body)]),
           );
           if (type === 3) anyPkmsg = true;
-          mem[jid] = true;
+          mem.jids[jid] = true;
         } catch {
           /* sem sessão com esse device — não dá pra distribuir agora */
         }
