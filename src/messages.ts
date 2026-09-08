@@ -1080,9 +1080,15 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
         }),
       );
 
+      // `mediatype` vai no <enc>, não no <message> — é assim que a Baileys manda
+      // (extraAttrs no nó de conteúdo cifrado).
+      const mediatype = msg.imageMessage ? "image" : msg.videoMessage ? "video" : undefined;
+      const encExtra: Record<string, string> = mediatype ? { mediatype } : {};
+
       const toNodes: BinaryNode[] = [];
       let anyPkmsg = false;
       for (const jid of deviceJids) {
+        if (jid === meId) continue; // não manda pro device que está rodando
         let addr: string;
         try {
           addr = signalAddress(jid);
@@ -1094,7 +1100,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
           const { type, body } = await signalEncrypt(deps, addr, skdmPlain);
           toNodes.push(
             node("to", { jid }, [
-              node("enc", { v: "2", type: type === 3 ? "pkmsg" : "msg" }, body),
+              node("enc", { v: "2", type: type === 3 ? "pkmsg" : "msg", ...encExtra }, body),
             ]),
           );
           if (type === 3) anyPkmsg = true;
@@ -1108,7 +1114,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
 
       const content: BinaryNode[] = [
         node("participants", {}, toNodes),
-        node("enc", { v: "2", type: "skmsg" }, skCipher),
+        node("enc", { v: "2", type: "skmsg", ...encExtra }, skCipher),
       ];
       if (anyPkmsg && auth.creds.account) {
         content.push(
@@ -1122,14 +1128,13 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
 
       const id = genId();
       // status@broadcast é sempre pn-endereçado (statusJidList é número) — a
-      // Baileys não põe addressing_mode aqui. `type` segue o conteúdo.
-      const mediatype = msg.imageMessage ? "image" : msg.videoMessage ? "video" : undefined;
+      // Baileys não põe addressing_mode aqui. `type` segue o conteúdo; o
+      // `mediatype` vai no <enc> (encExtra), não aqui.
       const attrs: Record<string, string> = {
         id,
         to: STATUS,
         type: mediatype ? "media" : "text",
       };
-      if (mediatype) attrs.mediatype = mediatype;
       const stanza = node("message", attrs, content);
       if (process.env.ONI_DEBUG_STATUS) {
         const dump = (n: BinaryNode): unknown => ({

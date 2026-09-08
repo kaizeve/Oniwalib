@@ -691,8 +691,11 @@ function bundleIq(remote: ReturnType<typeof memoryAuthState>, jid: string, otkPu
   ok("status+statusDevices: <enc type=skmsg> no corpo",
     getBinaryNodeChildren(sm, "enc").some((e) => e.attrs.type === "skmsg"));
   ok("status+statusDevices: sem addressing_mode (status é sempre pn)", sm?.attrs.addressing_mode === undefined);
-  ok("status+statusDevices: imageMessage → type=media mediatype=image",
-    sm?.attrs.type === "media" && sm?.attrs.mediatype === "image");
+  ok("status+statusDevices: imageMessage → <message type=media>, mediatype no <enc> (como a Baileys)",
+    sm?.attrs.type === "media" &&
+      sm?.attrs.mediatype === undefined &&
+      getBinaryNodeChildren(sm, "enc").find((e) => e.attrs.type === "skmsg")?.attrs.mediatype === "image" &&
+      getBinaryNodeChild(sto, "enc")?.attrs.mediatype === "image");
 
   // o device decifra: SKDM (pkmsg) + skmsg
   const rec = new SenderKeyRecord();

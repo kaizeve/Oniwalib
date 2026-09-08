@@ -644,17 +644,20 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
   }
 
   // Devices de uma lista solta de números (destinatários de status). Mesma
-  // resolução USYNC do grupo, sem a metadata. Exclui as nossas próprias contas.
+  // resolução USYNC do grupo, sem a metadata. INCLUI a nossa própria conta no
+  // fan-out — a Baileys consulta `getUSyncDevices([senderIdentity, jid])` e sem
+  // a cópia pros nossos devices o WhatsApp não registra o status como publicado
+  // (ninguém vê). O device que está rodando é excluído lá no `sendStatus`.
   const resolveStatusDeviceJids = async (userJids: string[]): Promise<string[]> => {
     const meUser = jidDecode(auth.creds.me?.id)?.user;
     const users = Array.from(
       new Set(
-        userJids
+        [...(meUser ? [`${meUser}@s.whatsapp.net`] : []), ...userJids]
           .map((j) => {
             const d = jidDecode(j);
             return d?.user ? `${d.user}@${d.server || "s.whatsapp.net"}` : undefined;
           })
-          .filter((j): j is string => !!j && jidDecode(j)?.user !== meUser),
+          .filter((j): j is string => !!j),
       ),
     );
     if (!users.length) return [];
