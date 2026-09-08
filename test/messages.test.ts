@@ -718,6 +718,17 @@ function bundleIq(remote: ReturnType<typeof memoryAuthState>, jid: string, otkPu
   const clear2 = decodeE2EMessage(unpad(groupDecrypt(C, rec, sk2!.content as Uint8Array)));
   ok("status texto: conversation → extendedTextMessage",
     clear2.extendedTextMessage?.text === "oi texto" && !clear2.conversation, JSON.stringify(clear2));
+
+  // reporting token — o WhatsApp exige pro fan-out do status. A Baileys anexa
+  // `messageContextInfo.messageSecret` (32B) no plaintext e um
+  // `<reporting><reporting_token v="2">` (16B) na stanza.
+  ok("status: messageSecret (32B) no conteúdo cifrado",
+    clear2.messageContextInfo?.messageSecret?.length === 32);
+  const repNode = getBinaryNodeChild(sm2, "reporting");
+  const repTok = getBinaryNodeChild(repNode, "reporting_token");
+  ok("status: <reporting><reporting_token v=2> de 16 bytes",
+    !!repNode && repTok?.attrs.v === "2" && (repTok?.content as Uint8Array)?.length === 16,
+    JSON.stringify({ hasRep: !!repNode, v: repTok?.attrs.v, len: (repTok?.content as Uint8Array)?.length }));
 }
 
 // --- onEncryptNotification NÃO faz loop de upload de pré-chave -------------

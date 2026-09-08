@@ -58,6 +58,7 @@ import {
 } from "./proto/e2e-message";
 import type { MessageKey } from "./events/emitter";
 import { buildPollCreation } from "./polls";
+import { buildReportingNode } from "./messages-reporting";
 
 export interface MessagesLayerOptions {
   events: Emitter;
@@ -1008,6 +1009,20 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
       msg = { extendedTextMessage: { text: msg.conversation } };
     }
 
+    // `messageContextInfo.messageSecret` (32 bytes) — a Baileys anexa em TODA
+    // mensagem que não é reaction/poll-update. Pro status é obrigatório: sem ele
+    // não dá pra derivar o reporting token e o WhatsApp não faz o fan-out (o
+    // status aparece só pra você, com 0 visualizações).
+    if (!msg.reactionMessage && !msg.pollUpdateMessage) {
+      msg = {
+        ...msg,
+        messageContextInfo: {
+          ...msg.messageContextInfo,
+          messageSecret: msg.messageContextInfo?.messageSecret ?? c.randomBytes(32),
+        },
+      };
+    }
+
     // O `statusJidList` do WhatsApp é lista de NÚMERO. Um destinatário `@lid` só
     // serve se a gente já pareou o número dele (stanza de grupo / metadata) —
     // senão o cold-send não abre sessão e o status sai pra ninguém.
@@ -1065,6 +1080,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     }
 
     return serial(async () => {
+      const id = genId();
       const recName = `${STATUS}::${signalAddress(meId)}`;
       const rec = await loadSenderKey(recName);
       const skdm = createSenderKeyDistribution(c, rec);
@@ -1126,7 +1142,26 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
         );
       }
 
-      const id = genId();
+      // reporting token — o WhatsApp exige `<reporting><reporting_token v="2">`
+      // no status@broadcast; sem ele o servidor aceita mas não fana pra ninguém.
+      try {
+        const secret = msg.messageContextInfo?.messageSecret;
+        if (secret && secret.length) {
+          const rep = buildReportingNode({
+            crypto: c,
+            encodedMsg: encodeE2EMessage(msg),
+            messageSecret: secret,
+            msgId: id,
+            from: STATUS,
+            to: STATUS,
+          });
+          if (rep) content.push(rep);
+        }
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error(`sendStatus: reporting token falhou (segue sem): ${(e as Error).message}`);
+      }
+
       // status@broadcast é sempre pn-endereçado (statusJidList é número) — a
       // Baileys não põe addressing_mode aqui. `type` segue o conteúdo; o
       // `mediatype` vai no <enc> (encExtra), não aqui.
