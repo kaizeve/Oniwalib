@@ -1128,9 +1128,11 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
         throw new Error("sendStatus: nenhum destinatário com sessão (tente `assertSessions` antes)");
       }
 
+      // ordem igual à da Baileys pro status: <enc skmsg> ANTES de <participants>
+      // (o servidor de status é mais estrito que o de grupo com a ordem).
       const content: BinaryNode[] = [
-        node("participants", {}, toNodes),
         node("enc", { v: "2", type: "skmsg", ...encExtra }, skCipher),
+        node("participants", {}, toNodes),
       ];
       if (anyPkmsg && auth.creds.account) {
         content.push(
