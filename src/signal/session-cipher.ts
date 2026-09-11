@@ -134,7 +134,7 @@ export async function decryptWhisperMessage(
 ): Promise<Uint8Array> {
   const { storage } = deps;
   const record = await storage.loadSession(addr);
-  if (!record) throw new Error("No session record");
+  if (!record) throw new Error("decrypt: sem registro de sessão");
 
   const errs: string[] = [];
   for (const session of record.getSessions()) {
@@ -199,7 +199,7 @@ async function doDecryptWhisperMessage(
 
   fillMessageKeys(c, chain, message.counter);
   if (!hasOwn(chain.messageKeys, message.counter)) {
-    throw new Error("Key used already or never filled");
+    throw new Error("msg: chave da mensagem já usada ou nunca preenchida");
   }
   const messageKey = chain.messageKeys[message.counter]!;
   delete chain.messageKeys[message.counter];
@@ -218,7 +218,7 @@ async function doDecryptWhisperMessage(
     messageProto,
   );
   const calcMac = c.hmacSha256(macKey, macInput).subarray(0, MAC_LENGTH);
-  if (!bytesEqual(calcMac, mac)) throw new Error("Bad MAC");
+  if (!bytesEqual(calcMac, mac)) throw new Error("msg: MAC não confere");
 
   const plaintext = c.aesCbcDecrypt(cipherKey, ivFull.subarray(0, 16), message.ciphertext);
   delete session.pendingPreKey;
@@ -274,10 +274,10 @@ function calculateRatchet(
 function fillMessageKeys(c: SignalDeps["c"], chain: Chain, counter: number): void {
   if (chain.chainKey.counter >= counter) return;
   if (counter - chain.chainKey.counter > 2000) {
-    throw new Error("Over 2000 messages into the future!");
+    throw new Error("msg: mais de 2000 mensagens à frente (chain divergiu)");
   }
   while (chain.chainKey.counter < counter) {
-    if (chain.chainKey.key === undefined) throw new Error("Chain closed");
+    if (chain.chainKey.key === undefined) throw new Error("msg: chain fechada");
     const key = chain.chainKey.key;
     chain.messageKeys[chain.chainKey.counter + 1] = c.hmacSha256(key, Uint8Array.from([1]));
     chain.chainKey.key = c.hmacSha256(key, Uint8Array.from([2]));

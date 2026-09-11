@@ -771,7 +771,7 @@ function bundleIq(remote: ReturnType<typeof memoryAuthState>, jid: string, otkPu
 // --- auto-heal: sessão pairwise dessincronizada é apagada após N falhas -----
 {
   // o bot tem sessão com USER_JID (do pkmsg lá no começo). Simula o par
-  // mandando `<enc type=msg>` que não decifra (Bad MAC) — 3x seguidas.
+  // mandando `<enc type=msg>` que não decifra ("MAC não confere") — 3x seguidas.
   const ADDR = "5511999999999.0";
   const had = await botAuth.keys.get("session", [ADDR]);
   ok("auto-heal: bot começa COM sessão", !!had[ADDR]);

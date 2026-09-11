@@ -25,6 +25,20 @@ be called out here and announced on the
   `logger.info`/`.warn`/`.error` instead of `console.*` directly.
 
 ### Fixed
+- **`src/signal/session-cipher.ts` threw 5 bare, unprefixed English error
+  messages** (`"No session record"`, `"Bad MAC"`, `"Key used already or never
+  filled"`, `"Chain closed"`, `"Over 2000 messages into the future!"`) —
+  leftovers from the reference libsignal port that never got the same
+  `"module: mensagem"` treatment as every sibling error in the same file
+  (`"pkmsg: sessão não foi criada"`, `"msg: chain de recepção ausente"`, …).
+  These reach an app operator directly (`messages: falha ao decifrar <enc
+  type=…> de …: <esta mensagem>`), so a raw, disconnected English string was
+  a real debuggability gap. Renamed to match the file's own convention.
+  **Caveat found while fixing:** `messages.ts`'s pairwise session auto-heal
+  (`looksLikeDesync`) string-matched the OLD English text to decide when to
+  wipe a desynced session — updated it in the same commit and re-verified the
+  "auto-heal: 3ª falha apaga a sessão" test still passes. No behavior change,
+  message text only.
 - 35 test files printed `[node]` instead of `[rts]` in their summary line when
   run on the engine — the runtime label checked a stale `globalThis.RTS`
   global that never existed, instead of `__rtsFetchText`. Cosmetic only (every

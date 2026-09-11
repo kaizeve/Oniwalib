@@ -196,15 +196,21 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
   // Auto-heal de sessão pairwise dessincronizada. Depois de um re-pareamento ou
   // de mensagens perdidas, os dois lados podem ficar com sessões que não casam:
   // o par manda `<enc type=msg>` (acha que a sessão está viva) e aqui só dá
-  // `Bad MAC` / "nenhuma sessão serviu", num loop que nunca cura sozinho. Ao
-  // acumular `SESSION_HEAL_THRESHOLD` falhas seguidas desse tipo para um mesmo
-  // endereço, a gente APAGA a sessão local — o próximo `pkmsg` do par reabre o
-  // X3DH do zero. Identidade (TOFU) e sender keys ficam. Zera no primeiro
-  // decrypt que der certo.
+  // "MAC não confere" / "nenhuma sessão serviu", num loop que nunca cura
+  // sozinho. Ao acumular `SESSION_HEAL_THRESHOLD` falhas seguidas desse tipo
+  // para um mesmo endereço, a gente APAGA a sessão local — o próximo `pkmsg`
+  // do par reabre o X3DH do zero. Identidade (TOFU) e sender keys ficam. Zera
+  // no primeiro decrypt que der certo.
+  //
+  // NB: casa por substring com as mensagens de `signal/session-cipher.ts` —
+  // mudou o texto lá, muda aqui também (`test/messages.test.ts` "auto-heal"
+  // cobre isso).
   const SESSION_HEAL_THRESHOLD = 3;
   const decryptFailStreak = new Map<string, number>();
   const looksLikeDesync = (m: string) =>
-    m.includes("Bad MAC") || m.includes("nenhuma sessão serviu") || m.includes("No session record");
+    m.includes("MAC não confere") ||
+    m.includes("nenhuma sessão serviu") ||
+    m.includes("sem registro de sessão");
 
   async function healSession(addr: string): Promise<void> {
     decryptFailStreak.delete(addr);
