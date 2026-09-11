@@ -15,6 +15,7 @@ import { type Curve, type SignalKeyPair } from "./curve";
 import { deriveSecrets } from "./kdf";
 import type { SignalStorage } from "./store";
 import type { PreKeyWhisperMessage } from "./protocol";
+import { consoleLogger, type Logger } from "../logger";
 import {
   SessionEntry,
   SessionRecord,
@@ -27,6 +28,9 @@ export interface SignalDeps {
   c: Crypto;
   curve: Curve;
   storage: SignalStorage;
+  /** Default `consoleLogger` — passe pra rotear os avisos do layer (ex.:
+   *  assinatura de signedPreKey que não confere) pro seu próprio logger. */
+  logger?: Logger;
 }
 
 export interface PreKeyBundle {
@@ -129,7 +133,7 @@ function calculateSendingRatchet(deps: SignalDeps, session: SessionEntry, remote
 }
 
 export async function initOutgoing(deps: SignalDeps, addr: string, bundle: PreKeyBundle): Promise<void> {
-  const { curve, storage } = deps;
+  const { curve, storage, logger = consoleLogger } = deps;
   if (!(await storage.isTrustedIdentity(addr, bundle.identityKey))) {
     throw new Error(`initOutgoing: identidade de ${addr} não confiável`);
   }
@@ -139,8 +143,7 @@ export async function initOutgoing(deps: SignalDeps, addr: string, bundle: PreKe
     bundle.signedPreKey.signature.length === 64 &&
     !curve.verifySignature(bundle.identityKey, bundle.signedPreKey.publicKey, bundle.signedPreKey.signature)
   ) {
-    // eslint-disable-next-line no-console
-    console.warn(`initOutgoing: assinatura da signedPreKey de ${addr} não confere`);
+    logger.warn(`initOutgoing: assinatura da signedPreKey de ${addr} não confere`);
   }
 
   const baseKey = curve.generateKeyPair();

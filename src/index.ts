@@ -64,6 +64,12 @@ export {
   type OpenOptions,
   type OniConnection,
 } from "./client";
+export {
+  consoleLogger,
+  silentLogger,
+  resolveLogger,
+  type Logger,
+} from "./logger";
 
 export {
   createMessagesLayer,

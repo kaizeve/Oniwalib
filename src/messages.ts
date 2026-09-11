@@ -59,9 +59,14 @@ import {
 import type { MessageKey } from "./events/emitter";
 import { buildPollCreation } from "./polls";
 import { buildReportingNode } from "./messages-reporting";
+import { consoleLogger, type Logger } from "./logger";
 
 export interface MessagesLayerOptions {
   events: Emitter;
+  /** Default `consoleLogger` (mesmo `console.log`/`console.error` de sempre).
+   *  Passe `silentLogger` ou o seu próprio pra rotear os diagnósticos do layer
+   *  (falha de decrypt, resultado de fanout de SKDM, upload de pré-chave…). */
+  logger?: Logger;
   auth: AuthenticationState;
   crypto: Crypto;
   /** Envia um node cru na conexão ativa. */
@@ -160,12 +165,23 @@ const PREKEY_LOW_WATERMARK = 10;
 const PREKEY_UPLOAD_MIN_INTERVAL_MS = 10 * 60 * 1000;
 
 export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
-  const { events, auth, crypto: c, sendNode, genId, query, groupDevices, statusDevices, lid } =
-    opts;
+  const {
+    events,
+    auth,
+    crypto: c,
+    sendNode,
+    genId,
+    query,
+    groupDevices,
+    statusDevices,
+    lid,
+    logger = consoleLogger,
+  } = opts;
   const deps: SignalDeps = {
     c,
     curve: makeCurve(c),
     storage: makeSignalStorage(auth),
+    logger,
   };
 
   // Serializa TODAS as operações Signal — o Double Ratchet muta estado
@@ -197,8 +213,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     } catch {
       return;
     }
-    // eslint-disable-next-line no-console
-    console.log(
+    logger.info(
       `messages: sessão com ${addr} apagada após ${SESSION_HEAL_THRESHOLD} falhas seguidas — ` +
         `aguardando o par reabrir (pkmsg)`,
     );
@@ -363,8 +378,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
       }
       content.push(node("keys", {}, keysChildren));
     } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error("messages: não consegui montar <keys> do retry:", (e as Error).message);
+      logger.error("messages: não consegui montar <keys> do retry:", (e as Error).message);
     }
 
     try {
@@ -416,8 +430,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
             ],
           });
         } catch (e) {
-          // eslint-disable-next-line no-console
-          console.error(`messages: canal ${from} — plaintext ilegível:`, (e as Error).message);
+          logger.error(`messages: canal ${from} — plaintext ilegível:`, (e as Error).message);
         }
       }
       sendDeliveryReceipt(stanza);
@@ -583,8 +596,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
             type: "notify",
             messages: [{ key: baseKey, message: undefined, messageTimestamp }],
           });
-          // eslint-disable-next-line no-console
-          console.error(`messages: falha ao decifrar <enc type=${type}> de ${author}: ${emsg}`);
+          logger.error(`messages: falha ao decifrar <enc type=${type}> de ${author}: ${emsg}`);
 
           // Sessão pairwise dessincronizada: conta as falhas seguidas e, no
           // limite, apaga a sessão para o próximo pkmsg do par reabrir.
@@ -719,8 +731,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
           await initOutgoing(deps, addr, bundle);
         } catch (e) {
           stillMissing.push(jid);
-          // eslint-disable-next-line no-console
-          console.error(`messages: X3DH com ${jid} falhou:`, (e as Error).message);
+          logger.error(`messages: X3DH com ${jid} falhou:`, (e as Error).message);
         }
       });
     }
@@ -734,8 +745,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
   ): Promise<{ id: string }> {
     if (extra?.opts) applyOpts(msg, extra.opts);
     if (process.env.ONI_DEBUG_MSG) {
-      // eslint-disable-next-line no-console
-      console.log(
+      logger.debug(
         `sendMessage(${jid}) keys=[${Object.keys(msg).join(",")}] plaintext=` +
           Buffer.from(encodeE2EMessage(msg)).toString("hex"),
       );
@@ -906,8 +916,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
         extraJids = await groupDevices(groupJid);
         if (extraJids.length) await assertSessions(extraJids);
       } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error(`messages: grupo ${groupJid} — não resolvi os devices:`, (e as Error).message);
+        logger.error(`messages: grupo ${groupJid} — não resolvi os devices:`, (e as Error).message);
         extraJids = [];
       }
     }
@@ -963,8 +972,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
         }
       }
       await savePeerMem(groupJid, mem);
-      // eslint-disable-next-line no-console
-      console.log(
+      logger.info(
         `messages: grupo ${groupJid} — SKDM p/ ${toNodes.length} device(s), ` +
           `${candidates.size} conhecido(s)`,
       );
@@ -1042,8 +1050,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
       targets.push(jid);
     }
     if (unresolved.length) {
-      // eslint-disable-next-line no-console
-      console.log(
+      logger.info(
         `sendStatus: ${unresolved.length} destinatário(s) sem número conhecido, ` +
           `tentando como lid: ${unresolved.join(", ")}`,
       );
@@ -1059,14 +1066,12 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
         const resolved = await statusDevices(targets);
         if (resolved.length) deviceJids = resolved;
       } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error(
+        logger.error(
           `sendStatus: não resolvi os devices, uso só o primário: ${(e as Error).message}`,
         );
       }
     }
-    // eslint-disable-next-line no-console
-    console.log(
+    logger.info(
       `sendStatus: ${targets.length} destinatário(s) → ${deviceJids.length} device(s)` +
         (deviceJids === targets ? " (USYNC não resolveu — só primário!)" : ` [${deviceJids.join(", ")}]`),
     );
@@ -1160,8 +1165,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
           if (rep) content.push(rep);
         }
       } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error(`sendStatus: reporting token falhou (segue sem): ${(e as Error).message}`);
+        logger.error(`sendStatus: reporting token falhou (segue sem): ${(e as Error).message}`);
       }
 
       // status@broadcast é sempre pn-endereçado (statusJidList é número) — a
@@ -1186,8 +1190,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
                   ? n.content.map(dump)
                   : undefined,
         });
-        // eslint-disable-next-line no-console
-        console.log(
+        logger.info(
           "sendStatus: plaintext =",
           Buffer.from(encodeE2EMessage(msg)).toString("hex"),
           "\nsendStatus: stanza =",
@@ -1210,8 +1213,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
       sendNode(iq);
       lastPreKeyUpload = Date.now();
       await opts.saveCreds?.();
-      // eslint-disable-next-line no-console
-      console.log(`messages: ${count} pré-chaves enviadas (próxima id ${auth.creds.nextPreKeyId})`);
+      logger.info(`messages: ${count} pré-chaves enviadas (próxima id ${auth.creds.nextPreKeyId})`);
     });
   }
 
@@ -1250,8 +1252,7 @@ export function createMessagesLayer(opts: MessagesLayerOptions): MessagesLayer {
     try {
       const remaining = await queryPreKeyCount();
       if (remaining !== undefined) {
-        // eslint-disable-next-line no-console
-        console.log(`messages: servidor tem ${remaining} pré-chave(s) nossas`);
+        logger.info(`messages: servidor tem ${remaining} pré-chave(s) nossas`);
       }
       if (remaining !== undefined && remaining >= PREKEY_LOW_WATERMARK) return;
       await uploadPreKeys();

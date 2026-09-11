@@ -14,6 +14,7 @@ import type { Emitter } from "../events/emitter";
 import type { AuthCreds, SignalKeyStore } from "../auth/state";
 import { b64 } from "../auth/state";
 import { node, type BinaryNode } from "../frame/node";
+import { consoleLogger, type Logger } from "../logger";
 import {
   ALL_PATCH_NAMES,
   chatModificationToAppPatch,
@@ -42,6 +43,8 @@ export interface AppStateLayerOptions {
   creds: AuthCreds;
   saveCreds?: () => void | Promise<void>;
   downloadBlob: DownloadExternalBlob;
+  /** Default `consoleLogger`. */
+  logger?: Logger;
 }
 
 export interface AppStateLayer {
@@ -58,7 +61,7 @@ export interface AppStateLayer {
 }
 
 export function createAppStateLayer(o: AppStateLayerOptions): AppStateLayer {
-  const { query, keys, crypto: c, events, creds } = o;
+  const { query, keys, crypto: c, events, creds, logger = consoleLogger } = o;
   const lt: LtHash = makeLtHash(c);
 
   const getKey = async (idB64: string): Promise<Uint8Array | undefined> => {
@@ -85,8 +88,7 @@ export function createAppStateLayer(o: AppStateLayerOptions): AppStateLayer {
       await Promise.resolve(o.saveCreds?.()).catch(() => {});
       events.emit("creds.update", { myAppStateKeyId: newest });
     }
-    // eslint-disable-next-line no-console
-    console.log(`appstate: ${share.length} chave(s) de sync guardada(s) (id ${newest.slice(0, 12)}…)`);
+    logger.info(`appstate: ${share.length} chave(s) de sync guardada(s) (id ${newest.slice(0, 12)}…)`);
   }
 
   function hasKeys(): boolean {
@@ -204,8 +206,7 @@ export function createAppStateLayer(o: AppStateLayerOptions): AppStateLayer {
 
   async function resync(names: WAPatchName[] = ALL_PATCH_NAMES): Promise<void> {
     if (!hasKeys()) {
-      // eslint-disable-next-line no-console
-      console.log("appstate: sem chaves de sync ainda — o device primário ainda não as mandou");
+      logger.info("appstate: sem chaves de sync ainda — o device primário ainda não as mandou");
       return;
     }
     try {
@@ -265,8 +266,7 @@ export function createAppStateLayer(o: AppStateLayerOptions): AppStateLayer {
 
       if (more) await resync(names);
     } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error("appstate: resync falhou:", (e as Error).message);
+      logger.error("appstate: resync falhou:", (e as Error).message);
     }
   }
 

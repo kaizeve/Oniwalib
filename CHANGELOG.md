@@ -10,6 +10,20 @@ be called out here and announced on the
 
 ## [Unreleased]
 
+### Added
+- **Injectable `Logger`** (`src/logger.ts`, exported: `Logger`,
+  `consoleLogger`, `silentLogger`). Every internal diagnostic (decrypt
+  failure, app-state resync, pre-key top-up, group/status SKDM fanout, …) was
+  a hardcoded `console.log`/`console.error` call — 28 sites across
+  `client.ts`, `messages.ts`, `appstate/layer.ts`,
+  `signal/session-builder.ts` — so an app embedding the library had no way to
+  silence, redirect, or level-filter them. `openWhatsApp({ logger })` now
+  takes a full or partial logger (`resolveLogger` fills in unset levels with
+  `consoleLogger`, so `{ error: myAlert }` only touches `error`); pass
+  `silentLogger` to go quiet. **Default behavior is byte-identical** to
+  before — every call site kept its exact message text, just routed through
+  `logger.info`/`.warn`/`.error` instead of `console.*` directly.
+
 ### Fixed
 - 35 test files printed `[node]` instead of `[rts]` in their summary line when
   run on the engine — the runtime label checked a stale `globalThis.RTS`
@@ -22,24 +36,25 @@ be called out here and announced on the
 ### RTS
 - Rebuilt against `UrubuCode/rts` @ `91d361080` (204 commits ahead of the last
   build tested) — `cargo build --profile fast`, clean, 5m38s.
-- Re-ran the full suite on the new binary with the label fix above: **1006 /
-  1006 on RTS**, one exception —
+- Re-ran the full suite on the new binary with the label fix above: **1019 /
+  1019 on RTS** (after the `Logger` refactor below — see the caveat).
 - **New engine bug found and filed: [#2719](https://github.com/UrubuCode/rts/issues/2719).**
   `test/signal.test.ts` (a from-scratch Double Ratchet round-trip: X3DH init +
-  ~15 encrypt/decrypt cycles) throws one of three different internal errors
+  ~15 encrypt/decrypt cycles) threw one of three different internal errors
   under `rts run` (`No session record`, `Bad MAC`, or an internal
   `TypeError: Cannot read properties of undefined (reading 'return')`)
-  depending on *unrelated* trailing code in the same file — always
-  deterministic for one exact file, always 13/13 green on bun/node. Stress-
-  tested the crypto primitives (X25519/AES-CBC/HMAC, 40 iterations), the
-  hand-rolled base64 codec (500 iterations), and a generic async+spread
-  microbenchmark in isolation — none reproduce it standalone, so it's not our
-  logic, not the crypto adapter, and not the base64 codec; it only shows up in
-  the full async Double Ratchet code path. Same family as the already-fixed
-  `#2617` (context-dependent codegen bug). The higher-level message path
-  (`messages.test.ts`, real group + 1:1 traffic through `client.ts`) is
-  unaffected — flagging as a latent risk for long-lived RTS connections, not
-  a currently-observed one.
+  depending on *unrelated* code shape elsewhere in the same import graph —
+  always deterministic for one exact source shape, always 13/13 green on
+  bun/node. Stress-tested the crypto primitives (X25519/AES-CBC/HMAC, 40
+  iterations), the hand-rolled base64 codec (500 iterations), and a generic
+  async+spread microbenchmark in isolation — none reproduce it standalone.
+  Same family as the already-fixed `#2617` (context-dependent codegen bug).
+  **Caveat:** the unrelated `Logger` refactor below (which touches
+  `signal/session-builder.ts`, imported by `signal.test.ts`) made the test
+  pass again, 10/10 deterministic runs — not a fix, just more evidence of how
+  small a change flips the trigger. Left #2719 open and posted the new data
+  point. The higher-level message path (`messages.test.ts`, real group + 1:1
+  traffic through `client.ts`) has never shown the bug.
 - Confirmed **still open** (unchanged behavior at the new build):
   `#2624` (const-arrow `?.` TDZ + sibling-block `const` residue,
   `test/channels.test.ts`) and `#2625` (bare-specifier resolution from

@@ -122,12 +122,14 @@ need it. Auth persists with **`jsonFileAuthState(path)`** (plain read/write, no
 Still open on RTS: `import "oniwalib"` from `node_modules`
 ([#2625](https://github.com/UrubuCode/rts/issues/2625)) — vendor the source.
 
-Suite: **1076 / 1076 on bun**, **1006 / 1006 on RTS** (`rts run` / `rts test`)
-outside of one known engine bug ([#2719](https://github.com/UrubuCode/rts/issues/2719),
-see `signal/` below). `client` and `file-state` skip themselves on the engine
-— the first drives the whole connection over the mock transport and hits an
-RTS async-scheduler edge, the second is node-only persistence with a
-`node:fs` sequencing edge; neither is in the library's path.
+Suite: **1076 / 1076 on bun**, **1019 / 1019 on RTS** (`rts run` / `rts test`).
+`client` and `file-state` skip themselves on the engine — the first drives the
+whole connection over the mock transport and hits an RTS async-scheduler edge,
+the second is node-only persistence with a `node:fs` sequencing edge; neither is
+in the library's path. `signal/` (see below) is currently green but sits on a
+known-fragile engine bug ([#2719](https://github.com/UrubuCode/rts/issues/2719))
+that flips on and off with unrelated code shape elsewhere in the same import
+graph — flagging it so a future red run there isn't a surprise.
 
 | Area | What it does | bun / node | RTS |
 |---|---|:---:|:---:|
@@ -137,7 +139,7 @@ RTS async-scheduler edge, the second is node-only persistence with a
 | `proto/` | own protobuf codec (no protobufjs) + `E2EMessage` codec (text, media, buttons/list/native-flow, poll, album, contextInfo, protocolMessage) + `ClientPayload` / `HandshakeMessage` wire | ✅ | ✅ |
 | `auth/` | credentials, Signal key store, signal identities; `memoryAuthState` + encrypted append-only `fileAuthState` | ✅ | ✅¹ |
 | `pairing.ts` · `client.ts` | `openWhatsApp` — QR + pairing code, `<pair-success>` crypto, `515` restart, login, keepalive/acks, the message / presence / notification / call pipeline | ✅ | ✅² |
-| `signal/` | native Double Ratchet + X3DH (1:1) + SenderKey group cipher (read + write), cold-send (`assertSessions` — prekey-bundle fetch + X3DH), pre-key top-up with a watermark — studied from libsignal, imports nothing | ✅ | ⚠️⁴ |
+| `signal/` | native Double Ratchet + X3DH (1:1) + SenderKey group cipher (read + write), cold-send (`assertSessions` — prekey-bundle fetch + X3DH), pre-key top-up with a watermark — studied from libsignal, imports nothing | ✅ | ✅⁴ |
 | `messages.ts` | decrypt `pkmsg`/`msg`/`skmsg` → `messages.upsert`; `sendText`/`sendMessage`/`sendAlbum` 1:1 + group; **edit** + **delete-for-all**; **reactions**; **polls** (create + `decryptPollVote`); `sendContact` / `sendLocation`; link preview; `SendOptions` (quoted reply, mentions, ephemeral) | ✅ | ✅ |
 | `media/` | send audio/image/video/document/sticker (per-type HKDF → AES-CBC + 10-byte MAC, `media_conn`, upload with host fallback); auto width/height + thumbnail; `downloadMedia` + `autoDownloadMedia` → `messages.media` | ✅ | ✅ |
 | status | `postStatus` (`status@broadcast` sender-key fan-out) **and receive** (generic skmsg path) | ✅ | ✅ |
@@ -164,18 +166,21 @@ RTS's `node:fs`. The library never imports this file unless you opt in (use
 itself is red on the engine ("promise cannot settle" — an async-scheduler edge
 in the test's mock transport driver, not the library).</sub>
 
-<sub>⁴ `test/signal.test.ts` is red on RTS as of the 2026-09-11 engine build — a
-long async Double Ratchet round-trip (X3DH init + ~15 encrypt/decrypt cycles
-over a session record) throws one of three different internal errors
-depending on unrelated code shape elsewhere in the file; 100% deterministic
-and correct on bun/node, and NOT reproducible in isolated stress tests of the
-crypto primitives, the base64 codec, or a generic async+spread microbenchmark
-— points at an engine-level codegen/GC bug in the same family as the
-already-fixed [#2617](https://github.com/UrubuCode/rts/issues/2617). Filed as
-[#2719](https://github.com/UrubuCode/rts/issues/2719). The higher-level
-message path (`messages.test.ts`, real group + 1:1 traffic through
-`client.ts`) is unaffected — 100% green — so this hasn't shown up in practice
-yet, but it's a latent risk for long-lived RTS connections.</sub>
+<sub>⁴ `test/signal.test.ts` is CURRENTLY green on RTS but is known to flip red on
+the same engine build depending on unrelated code shape elsewhere in the same
+import graph — a long async Double Ratchet round-trip (X3DH init + ~15
+encrypt/decrypt cycles over a session record) has thrown three different
+internal errors in past runs, always 100% deterministic and correct on
+bun/node, NOT reproducible in isolated stress tests of the crypto primitives,
+the base64 codec, or a generic async+spread microbenchmark — points at an
+engine-level codegen/GC bug in the same family as the already-fixed
+[#2617](https://github.com/UrubuCode/rts/issues/2617). Filed as
+[#2719](https://github.com/UrubuCode/rts/issues/2719), still open (a small,
+unrelated refactor nearby made it pass again — not a fix, just evidence of how
+fragile the trigger is). The higher-level message path (`messages.test.ts`,
+real group + 1:1 traffic through `client.ts`) has never shown the bug — 100%
+green throughout — so treat this as a latent risk for long-lived RTS
+connections, not a confirmed one.</sub>
 
 <sub>RTS engine issues found while porting. **Fixed upstream:** module-graph AOT
 ([#2611](https://github.com/UrubuCode/rts/issues/2611)), regex `[` in a char

@@ -84,6 +84,7 @@ import {
 } from "./frame/node";
 import { utf8Decode } from "./frame/buffer";
 import { jidDecode, isJidNewsletter } from "./frame/jid";
+import { resolveLogger, type Logger } from "./logger";
 
 const S_WHATSAPP_NET = "@s.whatsapp.net";
 const ACKABLE = new Set(["message", "receipt", "notification", "call", "ack"]);
@@ -147,6 +148,12 @@ export interface OpenOptions {
    *  na embutida `DEFAULT_REQUIRED_CHANNELS`), então repontar isto não burla a
    *  atribuição. */
   channelsSource?: string;
+  /** Roteia os diagnósticos internos (decrypt falho, resync, upload de
+   *  pré-chave, fanout de status/grupo…). Default: `console.log`/`.warn`/
+   *  `.error`, como sempre foi — passar um logger parcial troca só os níveis
+   *  informados (`{ error: meuAlerta }` deixa `info`/`warn`/`debug` no
+   *  console). Passe `silentLogger` pra calar tudo. */
+  logger?: Partial<Logger>;
 }
 
 export interface OniConnection {
@@ -405,6 +412,7 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
   const events = new Emitter();
   const c = opts.crypto ?? defaultCrypto();
   const { auth } = opts;
+  const logger: Logger = resolveLogger(opts.logger);
   const keepAliveMs = opts.keepAliveMs ?? 25000;
   const maxRetries = opts.maxRetries ?? 5;
 
@@ -558,20 +566,17 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
         if (r.action === "followed") {
           done.add(code);
           changed = true;
-          // eslint-disable-next-line no-console
-          console.log(`channels: conta agora segue o canal oficial ${label}`);
+          logger.info(`channels: conta agora segue o canal oficial ${label}`);
         } else if (r.action === "already") {
           done.add(code);
           changed = true;
         } else {
-          // eslint-disable-next-line no-console
-          console.error(`channels: não consegui garantir ${link}: ${r.error ?? "erro"}`);
+          logger.error(`channels: não consegui garantir ${link}: ${r.error ?? "erro"}`);
         }
       }
       if (changed) await auth.keys.set({ "lid-mapping": { [CHANNELS_DONE_ID]: [...done] } });
     } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error("channels: verificação de canal falhou:", (e as Error).message);
+      logger.error("channels: verificação de canal falhou:", (e as Error).message);
     }
   };
 
@@ -677,6 +682,7 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     statusDevices: resolveStatusDeviceJids,
     lid: lidStore,
     saveCreds: opts.saveCreds,
+    logger,
   });
   let preKeysUploaded = false;
 
@@ -694,6 +700,7 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     events,
     creds: auth.creds,
     saveCreds: opts.saveCreds,
+    logger,
     downloadBlob: (ref) => media.downloadEncryptedBlob(ref, "WhatsApp App State Keys"),
   });
   let appStateSynced = false;
@@ -807,12 +814,12 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
         void appstate
           .ingestKeys(share)
           .then(() => appstate.resync())
-          .catch((e) => console.error("appstate: ingest/resync falhou:", (e as Error).message));
+          .catch((e) => logger.error("appstate: ingest/resync falhou:", (e as Error).message));
       }
       const hsn = pmsg?.historySyncNotification;
       if (hsn?.mediaKey && hsn.directPath) {
         void ingestHistorySync(hsn).catch((e) =>
-          console.error("history: sync falhou:", (e as Error).message),
+          logger.error("history: sync falhou:", (e as Error).message),
         );
       }
     }
@@ -823,7 +830,7 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     syncType?: number; progress?: number;
   }): Promise<void> => {
     if (!c.inflate) {
-      console.error("history: adapter de cripto sem `inflate` (node:zlib) — history sync indisponível");
+      logger.error("history: adapter de cripto sem `inflate` (node:zlib) — history sync indisponível");
       return;
     }
     const compressed = await media.downloadEncryptedBlob(
@@ -849,7 +856,7 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
       progress: hist.progress,
       isLatest: (hist.progress ?? 0) >= 100,
     });
-    console.log(
+    logger.info(
       `history: ${hist.syncTypeName ?? "?"} — ${hist.chats.length} chat(s), ` +
         `${messages.length} msg(s), ${hist.pushnames.length} nome(s)` +
         (hist.progress !== undefined ? `, ${hist.progress}%` : ""),
@@ -967,8 +974,7 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
       preKeysUploaded = true;
       void messages.onEncryptNotification().catch((e) => {
         preKeysUploaded = false;
-        // eslint-disable-next-line no-console
-        console.error("client: reposição de pré-chaves falhou:", (e as Error).message);
+        logger.error("client: reposição de pré-chaves falhou:", (e as Error).message);
       });
     }
 
@@ -1051,8 +1057,7 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
         return reconnect();
       case "message":
         void messages.handleMessageStanza(n).catch((e) => {
-          // eslint-disable-next-line no-console
-          console.error("client: handleMessageStanza:", (e as Error).message);
+          logger.error("client: handleMessageStanza:", (e as Error).message);
         });
         return sendAck(n);
       case "notification":

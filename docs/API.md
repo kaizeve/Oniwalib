@@ -62,6 +62,7 @@ id). `MessageKey` is `{ remoteJid, id, fromMe, participant? }`.
 | `qrTimeoutMs` | `number` | `60000` / `20000` | ms before rotating the QR ref |
 | `connectTimeoutMs` | `number` | `20000` | transport connect timeout |
 | `channelsSource` | `string` | built-in | override the required-channels JSON URL (test only) |
+| `logger` | `Partial<Logger>` | `consoleLogger` | routes internal diagnostics (decrypt failures, resync, pre-key top-up, …); a partial object only overrides the levels you give it. Pass `silentLogger` to go quiet. |
 
 Returns an **`OniConnection`**. `conn.state` is `"connecting" | "open" | "close"`.
 
@@ -108,6 +109,25 @@ Helpers (from `oniwalib` root): `hasDownloadableMedia(msg)`, `imageDimensions(by
 | `qrMatrix(qrString)` | the raw `boolean[][]` module grid |
 
 Needs `qrcode-terminal` resolvable from `node_modules` — on RTS (`#2625`) `qrMatrix`/`renderQr` throw; print the raw `u.qr` string there.
+
+### Logging
+
+Every internal diagnostic (decrypt failures, app-state resync, pre-key
+top-up, group/status SKDM fanout, …) goes through an injectable `Logger`
+instead of a hardcoded `console.*` call, so an app embedding the library can
+silence, redirect, or level-filter them.
+
+| export | what |
+|---|---|
+| `type Logger` | `{ debug, info, warn, error }`, each `(msg: string, ...args: unknown[]) => void` |
+| `consoleLogger` | the default — `debug`/`info` → `console.log`, `warn` → `console.warn`, `error` → `console.error` |
+| `silentLogger` | every level a no-op |
+| `resolveLogger(partial?)` | fills in any levels missing from a partial logger with `consoleLogger`'s |
+
+```ts
+openWhatsApp({ auth, logger: silentLogger });                 // quiet
+openWhatsApp({ auth, logger: { error: myAlerting } });         // only `error` changes
+```
 
 ### Status (`status@broadcast`)
 
