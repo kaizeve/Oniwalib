@@ -125,7 +125,7 @@ ok("jid já normalizado passa igual", jidNormalizedUser(A) === A);
 const rt =
   typeof (globalThis as any).Bun !== "undefined"
     ? "bun"
-    : typeof (globalThis as any).RTS !== "undefined"
+    : typeof (globalThis as any).Bun === "undefined" && typeof (globalThis as any).__rtsFetchText !== "undefined"
       ? "rts"
       : "node";
 console.log(`\noniwalib/usync [${rt}]  ${pass} pass, ${fail} fail`);

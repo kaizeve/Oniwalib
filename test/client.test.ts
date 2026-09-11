@@ -177,7 +177,7 @@ ok("end() → state 'close' + connection.update close", conn.state === "close" &
 const rt =
   typeof (globalThis as any).Bun !== "undefined"
     ? "bun"
-    : typeof (globalThis as any).RTS !== "undefined"
+    : typeof (globalThis as any).Bun === "undefined" && typeof (globalThis as any).__rtsFetchText !== "undefined"
       ? "rts"
       : "node";
 console.log(`\noniwalib/client [${rt}]  ${pass} pass, ${fail} fail`);

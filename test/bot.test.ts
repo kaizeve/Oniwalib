@@ -177,7 +177,7 @@ sock.close();
 const rt =
   typeof (globalThis as any).Bun !== "undefined"
     ? "bun"
-    : typeof (globalThis as any).RTS !== "undefined"
+    : typeof (globalThis as any).Bun === "undefined" && typeof (globalThis as any).__rtsFetchText !== "undefined"
       ? "rts"
       : "node";
 console.log(`\noniwalib/bot [${rt}]  ${pass} pass, ${fail} fail`);

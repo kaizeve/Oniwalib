@@ -125,7 +125,7 @@ ok("zero não emite", new Writer().uint(1, 0).bool(2, false).string(3, "").finis
 const rt =
   typeof (globalThis as any).Bun !== "undefined"
     ? "bun"
-    : typeof (globalThis as any).RTS !== "undefined"
+    : typeof (globalThis as any).Bun === "undefined" && typeof (globalThis as any).__rtsFetchText !== "undefined"
       ? "rts"
       : "node";
 console.log(`\noniwalib/wire [${rt}]  ${pass} pass, ${fail} fail`);

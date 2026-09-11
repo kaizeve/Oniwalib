@@ -10,6 +10,45 @@ be called out here and announced on the
 
 ## [Unreleased]
 
+### Fixed
+- 35 test files printed `[node]` instead of `[rts]` in their summary line when
+  run on the engine — the runtime label checked a stale `globalThis.RTS`
+  global that never existed, instead of `__rtsFetchText`. Cosmetic only (every
+  test still ran and asserted on the right runtime), but it hid which runtime
+  actually produced a given pass/fail count. All switched to the same
+  `!Bun && __rtsFetchText` detection `json-state`/`ws-connector`/`qr` already
+  used.
+
+### RTS
+- Rebuilt against `UrubuCode/rts` @ `91d361080` (204 commits ahead of the last
+  build tested) — `cargo build --profile fast`, clean, 5m38s.
+- Re-ran the full suite on the new binary with the label fix above: **1006 /
+  1006 on RTS**, one exception —
+- **New engine bug found and filed: [#2719](https://github.com/UrubuCode/rts/issues/2719).**
+  `test/signal.test.ts` (a from-scratch Double Ratchet round-trip: X3DH init +
+  ~15 encrypt/decrypt cycles) throws one of three different internal errors
+  under `rts run` (`No session record`, `Bad MAC`, or an internal
+  `TypeError: Cannot read properties of undefined (reading 'return')`)
+  depending on *unrelated* trailing code in the same file — always
+  deterministic for one exact file, always 13/13 green on bun/node. Stress-
+  tested the crypto primitives (X25519/AES-CBC/HMAC, 40 iterations), the
+  hand-rolled base64 codec (500 iterations), and a generic async+spread
+  microbenchmark in isolation — none reproduce it standalone, so it's not our
+  logic, not the crypto adapter, and not the base64 codec; it only shows up in
+  the full async Double Ratchet code path. Same family as the already-fixed
+  `#2617` (context-dependent codegen bug). The higher-level message path
+  (`messages.test.ts`, real group + 1:1 traffic through `client.ts`) is
+  unaffected — flagging as a latent risk for long-lived RTS connections, not
+  a currently-observed one.
+- Confirmed **still open** (unchanged behavior at the new build):
+  `#2624` (const-arrow `?.` TDZ + sibling-block `const` residue,
+  `test/channels.test.ts`) and `#2625` (bare-specifier resolution from
+  `node_modules`) — commented on both with the re-repro at `91d361080` for
+  whoever picks them up next.
+- Confirmed **no regression** on what already worked: `examples/bot-rts.ts`
+  still completes the Noise handshake and connects live to WhatsApp over
+  `wsConnector` (`ws` over `node:tls`) on the new build.
+
 ## [0.2.0] — 2026-09-05
 
 ### Added

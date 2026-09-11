@@ -209,7 +209,7 @@ eq("text simples", m.text("oi"), { conversation: "oi" });
 const runtime =
   typeof (globalThis as any).Bun !== "undefined"
     ? "bun"
-    : typeof (globalThis as any).RTS !== "undefined"
+    : typeof (globalThis as any).Bun === "undefined" && typeof (globalThis as any).__rtsFetchText !== "undefined"
       ? "rts"
       : "node";
 

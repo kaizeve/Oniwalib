@@ -122,11 +122,12 @@ need it. Auth persists with **`jsonFileAuthState(path)`** (plain read/write, no
 Still open on RTS: `import "oniwalib"` from `node_modules`
 ([#2625](https://github.com/UrubuCode/rts/issues/2625)) — vendor the source.
 
-Suite: **1076 / 1076 on bun**, **green on RTS** (`rts run` / `rts test`).
-`client` and `file-state` skip themselves on the engine — the first drives the
-whole connection over the mock transport and hits an RTS async-scheduler edge,
-the second is node-only persistence with a `node:fs` sequencing edge; neither is
-in the library's path.
+Suite: **1076 / 1076 on bun**, **1006 / 1006 on RTS** (`rts run` / `rts test`)
+outside of one known engine bug ([#2719](https://github.com/UrubuCode/rts/issues/2719),
+see `signal/` below). `client` and `file-state` skip themselves on the engine
+— the first drives the whole connection over the mock transport and hits an
+RTS async-scheduler edge, the second is node-only persistence with a
+`node:fs` sequencing edge; neither is in the library's path.
 
 | Area | What it does | bun / node | RTS |
 |---|---|:---:|:---:|
@@ -136,7 +137,7 @@ in the library's path.
 | `proto/` | own protobuf codec (no protobufjs) + `E2EMessage` codec (text, media, buttons/list/native-flow, poll, album, contextInfo, protocolMessage) + `ClientPayload` / `HandshakeMessage` wire | ✅ | ✅ |
 | `auth/` | credentials, Signal key store, signal identities; `memoryAuthState` + encrypted append-only `fileAuthState` | ✅ | ✅¹ |
 | `pairing.ts` · `client.ts` | `openWhatsApp` — QR + pairing code, `<pair-success>` crypto, `515` restart, login, keepalive/acks, the message / presence / notification / call pipeline | ✅ | ✅² |
-| `signal/` | native Double Ratchet + X3DH (1:1) + SenderKey group cipher (read + write), cold-send (`assertSessions` — prekey-bundle fetch + X3DH), pre-key top-up with a watermark — studied from libsignal, imports nothing | ✅ | ✅ |
+| `signal/` | native Double Ratchet + X3DH (1:1) + SenderKey group cipher (read + write), cold-send (`assertSessions` — prekey-bundle fetch + X3DH), pre-key top-up with a watermark — studied from libsignal, imports nothing | ✅ | ⚠️⁴ |
 | `messages.ts` | decrypt `pkmsg`/`msg`/`skmsg` → `messages.upsert`; `sendText`/`sendMessage`/`sendAlbum` 1:1 + group; **edit** + **delete-for-all**; **reactions**; **polls** (create + `decryptPollVote`); `sendContact` / `sendLocation`; link preview; `SendOptions` (quoted reply, mentions, ephemeral) | ✅ | ✅ |
 | `media/` | send audio/image/video/document/sticker (per-type HKDF → AES-CBC + 10-byte MAC, `media_conn`, upload with host fallback); auto width/height + thumbnail; `downloadMedia` + `autoDownloadMedia` → `messages.media` | ✅ | ✅ |
 | status | `postStatus` (`status@broadcast` sender-key fan-out) **and receive** (generic skmsg path) | ✅ | ✅ |
@@ -163,15 +164,31 @@ RTS's `node:fs`. The library never imports this file unless you opt in (use
 itself is red on the engine ("promise cannot settle" — an async-scheduler edge
 in the test's mock transport driver, not the library).</sub>
 
-<sub>RTS engine issues found while porting, **all filed and now fixed
-upstream**: module-graph AOT
+<sub>⁴ `test/signal.test.ts` is red on RTS as of the 2026-09-11 engine build — a
+long async Double Ratchet round-trip (X3DH init + ~15 encrypt/decrypt cycles
+over a session record) throws one of three different internal errors
+depending on unrelated code shape elsewhere in the file; 100% deterministic
+and correct on bun/node, and NOT reproducible in isolated stress tests of the
+crypto primitives, the base64 codec, or a generic async+spread microbenchmark
+— points at an engine-level codegen/GC bug in the same family as the
+already-fixed [#2617](https://github.com/UrubuCode/rts/issues/2617). Filed as
+[#2719](https://github.com/UrubuCode/rts/issues/2719). The higher-level
+message path (`messages.test.ts`, real group + 1:1 traffic through
+`client.ts`) is unaffected — 100% green — so this hasn't shown up in practice
+yet, but it's a latent risk for long-lived RTS connections.</sub>
+
+<sub>RTS engine issues found while porting. **Fixed upstream:** module-graph AOT
 ([#2611](https://github.com/UrubuCode/rts/issues/2611)), regex `[` in a char
 class ([#2612](https://github.com/UrubuCode/rts/issues/2612)), a closure over a
 param that indexes `Map.get(k)?.[0]` returning the param
-([#2617](https://github.com/UrubuCode/rts/issues/2617)). One workaround stays in
-the source (const-arrow `?.` TDZ → `function` decl). Open:
-`node_modules` bare-specifier resolution
-([#2625](https://github.com/UrubuCode/rts/issues/2625)).</sub>
+([#2617](https://github.com/UrubuCode/rts/issues/2617)). **Still open**
+(workarounds stay in the source, none block the library): `node_modules`
+bare-specifier resolution
+([#2625](https://github.com/UrubuCode/rts/issues/2625)); const-arrow `?.` TDZ
+and a `const`/`const` sibling-block residue of #2619
+([#2624](https://github.com/UrubuCode/rts/issues/2624), confirmed still
+reproducing 2026-09-11); the Double Ratchet async codegen/GC bug above
+([#2719](https://github.com/UrubuCode/rts/issues/2719), new 2026-09-11).</sub>
 
 ### Phase 0 — engine primitives
 
@@ -184,11 +201,11 @@ the source (const-arrow `?.` TDZ → `function` decl). Open:
 
 With this, the Noise handshake, credential initialization, identity signing,
 the Signal 1:1 + group ciphers, pairing and the message/presence pipeline all
-run on the engine — `RTS_GAPS` is empty and the suite is green on RTS bar
-`file-state`. What's left to actually **connect** on RTS is the transport layer
-(TLS + WebSocket client). On **bun / node** it's all covered, so pairing works
-end to end there today — see
-`examples/pair.ts`.
+run on the engine — `RTS_GAPS` is empty. **Update:** the transport layer (TLS +
+WebSocket client) mentioned as missing below is done too — `wsConnector` (see
+the table above) connects live to WhatsApp from `rts run`, Noise handshake and
+all; `examples/bot-rts.ts` is a runnable RTS bot. On **bun / node** it's all
+covered too — see `examples/pair.ts`.
 
 ### <a name="tests"></a>Tests
 

@@ -137,7 +137,7 @@ const biz = createBusinessLayer({ query, meId: () => "5511000000000:3@s.whatsapp
 const rt =
   typeof (globalThis as any).Bun !== "undefined"
     ? "bun"
-    : typeof (globalThis as any).RTS !== "undefined"
+    : typeof (globalThis as any).Bun === "undefined" && typeof (globalThis as any).__rtsFetchText !== "undefined"
       ? "rts"
       : "node";
 console.log(`\noniwalib/business [${rt}]  ${pass} pass, ${fail} fail`);

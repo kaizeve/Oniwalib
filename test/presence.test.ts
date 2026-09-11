@@ -113,7 +113,7 @@ ok("subscribePresence → <presence type=subscribe to id>", sent[0]?.tag === "pr
 const rt =
   typeof (globalThis as any).Bun !== "undefined"
     ? "bun"
-    : typeof (globalThis as any).RTS !== "undefined"
+    : typeof (globalThis as any).Bun === "undefined" && typeof (globalThis as any).__rtsFetchText !== "undefined"
       ? "rts"
       : "node";
 console.log(`\noniwalib/presence [${rt}]  ${pass} pass, ${fail} fail`);
