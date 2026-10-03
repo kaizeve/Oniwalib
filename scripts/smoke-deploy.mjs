@@ -1,5 +1,5 @@
-// Deploy smoke test — packs oniwalib the way it would ship, installs it into a
-// throwaway consumer, and imports it BY NAME (`from "oniwalib"`) under node and
+// Deploy smoke test — packs @oniwa/core the way it would ship, installs it into a
+// throwaway consumer, and imports it BY NAME (`from "@oniwa/core"`) under node and
 // bun, running a real check each time. This is the "does a deploy work" gate.
 //
 //   node scripts/smoke-deploy.mjs
@@ -22,7 +22,7 @@ const run = (cmd, args, opts = {}) =>
   execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], ...opts });
 
 const CHECK = `
-import * as oni from "oniwalib";
+import * as oni from "@oniwa/core";
 const need = ["openWhatsApp","memoryAuthState","fileAuthState","initAuthCreds","crypto",
   "makeInMemoryStore","encodeE2EMessage","decodeE2EMessage","message","frame","signal"];
 for (const k of need) if (!(k in oni)) { console.error("MISSING export:", k); process.exit(1); }
@@ -55,7 +55,7 @@ try {
   run("mkdir", ["-p", consumer]);
   writeFileSync(
     join(consumer, "package.json"),
-    JSON.stringify({ name: "consumer", type: "module", dependencies: { oniwalib: tgz } }, null, 2),
+    JSON.stringify({ name: "consumer", type: "module", dependencies: { "@oniwa/core": tgz } }, null, 2),
   );
   writeFileSync(join(consumer, "check.mjs"), CHECK);
 
@@ -85,6 +85,6 @@ try {
   try {
     rmSync(work, { recursive: true, force: true });
   } catch {}
-  // drop any stray oniwalib-*.tgz npm left in ROOT
-  for (const f of readdirSync(ROOT)) if (/^oniwalib-.*\.tgz$/.test(f)) rmSync(join(ROOT, f));
+  // drop any stray oniwa-core-*.tgz npm left in ROOT
+  for (const f of readdirSync(ROOT)) if (/^oniwa-core-.*\.tgz$/.test(f)) rmSync(join(ROOT, f));
 }

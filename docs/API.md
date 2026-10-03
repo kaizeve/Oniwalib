@@ -12,7 +12,7 @@ authoritative.
 ## Getting started
 
 ```ts
-import { openWhatsApp, fileAuthState } from "oniwalib";
+import { openWhatsApp, fileAuthState } from "@oniwa/core";
 
 const auth = fileAuthState("./auth/state.owl");         // encrypted, append-only
 const conn = openWhatsApp({
@@ -98,7 +98,7 @@ Need `fetch` in `openWhatsApp`, plus a Signal session with `jid` (1:1).
 | `sendSticker(jid, data, opts?)` | `StickerOptions`: `mimetype?`, `width?`, `height?`, `isAnimated?` |
 | `downloadMedia(msg)` | `DownloadedMedia` = `{ data, type, mimetype? }`. Pass `m.message` from a `messages.upsert`. Unwraps `viewOnceMessage`/`deviceSentMessage`. With `autoDownloadMedia: true` this happens automatically → `messages.media` |
 
-Helpers (from `oniwalib` root): `hasDownloadableMedia(msg)`, `imageDimensions(bytes)`, `mp4Dimensions(bytes)`, `fetchLinkPreview(text, fetch)`, `firstUrl(text)`.
+Helpers (from `@oniwa/core` root): `hasDownloadableMedia(msg)`, `imageDimensions(bytes)`, `mp4Dimensions(bytes)`, `fetchLinkPreview(text, fetch)`, `firstUrl(text)`.
 
 ### QR rendering
 
@@ -300,7 +300,7 @@ await conn.waitUntilClose(); // holds the process; also runs the keepalive ping 
 | `conn.start()` | `Promise<void>` — await the handshake explicitly. Optional on bun/node, **required on RTS** |
 | `conn.waitUntilClose()` | `Promise<void>` — blocks until the connection closes; ticks the keepalive itself on engines without a real `setInterval` |
 
-`wsConnector` (from `"oniwalib"`) is the default `Connector` — a real `wss://`
+`wsConnector` (from `"@oniwa/core"`) is the default `Connector` — a real `wss://`
 client using the `ws` package when it resolves (node after `npm install ws`,
 bun, and RTS, where `ws` runs over the engine's `node:net`/`node:tls`), falling
 back to the global `WebSocket`.
@@ -308,7 +308,7 @@ back to the global `WebSocket`.
 `resolveOniVersion()` skips its network fetch on RTS (blocks the engine loop)
 and falls back to the built-in version instead of throwing.
 
-`examples/bot-rts.ts` is a runnable RTS bot. Known gap: `import "oniwalib"` by
+`examples/bot-rts.ts` is a runnable RTS bot. Known gap: `import "@oniwa/core"` by
 bare package name doesn't resolve on RTS yet (`UrubuCode/rts#2625`) — import
 from `src/index.ts` relatively until that lands.
 

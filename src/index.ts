@@ -1,4 +1,4 @@
-// oniwalib — cliente WhatsApp Multi-Device sobre o RTS (nome provisório).
+// @oniwa/core (Oniwa) — cliente WhatsApp Multi-Device sobre o RTS.
 //
 // Estado (2026-08-30). Roda em bun/node HOJE; roda no RTS nas partes que não
 // dependem da Fase 0.

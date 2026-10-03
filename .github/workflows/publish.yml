@@ -1,0 +1,32 @@
+name: Publish
+
+# Publica no npm quando uma tag vX.Y.Z é empurrada.
+#   git tag v0.3.0 && git push origin v0.3.0
+# Precisa do secret NPM_TOKEN (automation token com acesso à org @oniwa).
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+  id-token: write # npm provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - uses: oven-sh/setup-bun@v2
+      - run: npm install
+      - run: npm run typecheck
+      - run: npm test
+      - name: Tag bate com a versão do package.json
+        run: test "v$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME}"
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

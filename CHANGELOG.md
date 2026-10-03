@@ -8,6 +8,25 @@ Versioning: while `0.x`, minor-version bumps may carry breaking changes; they'll
 be called out here and announced on the
 [official channel](https://whatsapp.com/channel/0029Vb93Ug3LI8YRuoroJd44).
 
+## [0.3.0] — unreleased
+
+### Changed
+- **Package renamed `oniwalib` → `@oniwa/core`** (`npm install @oniwa/core`).
+  Update imports: `from "oniwalib"` → `from "@oniwa/core"`.
+- **License is now Apache-2.0** (was a restricted-use license). Free to use,
+  modify and redistribute; keep `LICENSE` + `NOTICE` and don't use the Oniwa
+  name for a derivative.
+- TypeScript declarations now ship in `dist/types` (`types` points there
+  instead of at `src/`).
+
+### Added
+- `npm run typecheck`, `npm run build:types`, CI (`.github/workflows/ci.yml`)
+  and tag-driven npm publish with provenance (`publish.yml`).
+- `engines.node >= 18`, `publishConfig.access = public`, repository metadata.
+
+### Fixed
+- 9 strict-mode type errors in `src/` (type-level only, no runtime change).
+
 ## [Unreleased]
 
 ### Added

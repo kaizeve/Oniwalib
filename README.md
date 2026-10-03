@@ -13,10 +13,10 @@ It talks the socket directly — no browser, no Puppeteer, no headless Chrome.
 [![runtimes](https://img.shields.io/badge/runs%20on-bun%20%C2%B7%20node%20%C2%B7%20RTS-0b7285?style=flat-square)](#status)
 [![language](https://img.shields.io/badge/TypeScript-3178c6?style=flat-square&logo=typescript&logoColor=white)](#)
 [![status](https://img.shields.io/badge/status-early%20%C2%B7%20foundation-d9822b?style=flat-square)](#status)
-[![license](https://img.shields.io/badge/license-restricted-c92a2a?style=flat-square)](LICENSE)
+[![license](https://img.shields.io/badge/license-Apache--2.0-2ea44f?style=flat-square)](LICENSE)
 [![channel](https://img.shields.io/badge/WhatsApp-official%20channel-25D366?style=flat-square&logo=whatsapp&logoColor=white)](https://whatsapp.com/channel/0029Vb93Ug3LI8YRuoroJd44)
 
-<sub>**OniWaLib** · `v0.2.0` · progress tracked separately from the RTS core · meet **Oni**, the mascot 👹 (a demon — but a friendly one)</sub>
+<sub>**OniWaLib** · `v0.3.0` · progress tracked separately from the RTS core · meet **Oni**, the mascot 👹 (a demon — but a friendly one)</sub>
 
 <sub>Official channel: **[whatsapp.com/channel/0029Vb93Ug3LI8YRuoroJd44](https://whatsapp.com/channel/0029Vb93Ug3LI8YRuoroJd44)** — releases, API changes, breaking-change notices.</sub>
 
@@ -119,7 +119,7 @@ because `rts run` drains its task queue and exits without a `setInterval`, so th
 connect chain must be awaited and the process held open by a loop; bun/node don't
 need it. Auth persists with **`jsonFileAuthState(path)`** (plain read/write, no
 `stat`) — `fileAuthState`'s encrypted append-log hits a `node:fs` edge on RTS.
-Still open on RTS: `import "oniwalib"` from `node_modules`
+Still open on RTS: `import "@oniwa/core"` from `node_modules`
 ([#2625](https://github.com/UrubuCode/rts/issues/2625)) — vendor the source.
 
 Suite: **1076 / 1076 on bun**, **1019 / 1019 on RTS** (`rts run` / `rts test`).
@@ -268,7 +268,7 @@ one stops working — the QR won't connect, login is refused.
   from the tuple.
 
 ```ts
-import { resolveOniVersion } from "oniwalib";
+import { resolveOniVersion } from "@oniwa/core";
 
 const { version, source } = await resolveOniVersion();   // e.g. [2, 3000, 1023223821] from "fetch"
 ```
@@ -278,11 +278,11 @@ const { version, source } = await resolveOniVersion();   // e.g. [2, 3000, 10232
 ## Install
 
 ```bash
-bun  add oniwalib        # or: git clone … && bun install
-npm  install oniwalib
+bun  add @oniwa/core
+npm  install @oniwa/core
 ```
 
-`import { openWhatsApp } from "oniwalib"` resolves per runtime:
+`import { openWhatsApp } from "@oniwa/core"` resolves per runtime:
 
 | Runtime | Entry | Notes |
 |---|---|---|
@@ -300,7 +300,7 @@ under node **and** bun — the deploy gate.
 ### Connect and reply
 
 ```ts
-import { openWhatsApp, fileAuthState } from "oniwalib";
+import { openWhatsApp, fileAuthState } from "@oniwa/core";
 
 const auth = fileAuthState("./auth/state.owl");     // encrypted, append-only
 const conn = openWhatsApp({
@@ -340,7 +340,7 @@ await conn.waitUntilClose(); // hold the process open + keepalive-ping
 ### Build a message with buttons
 
 ```ts
-import { message as m } from "oniwalib";
+import { message as m } from "@oniwa/core";
 
 const msg = m.buttons({
   content: "Pick an option:",
@@ -355,7 +355,7 @@ const msg = m.buttons({
 ### Native flow (the path modified forks use today)
 
 ```ts
-import { message as m } from "oniwalib";
+import { message as m } from "@oniwa/core";
 
 const msg = m.interactive({
   body: "Your order is ready.",
@@ -418,7 +418,7 @@ npm run bot:down     # stop
 ### Encode / decode a binary node
 
 ```ts
-import { frame } from "oniwalib";
+import { frame } from "@oniwa/core";
 
 const bytes = frame.encodeBinaryNode(
   frame.node("iq", { type: "get", xmlns: "w:p", to: "s.whatsapp.net" }),
@@ -430,7 +430,7 @@ const back = frame.decodeBinaryNode(bytes); // → { tag: "iq", attrs: {...} }
 
 ```ts
 import { NoiseSocket, mockTransportPair, crypto, encodeClientPayload,
-         buildClientPayload, initAuthCreds, STOCK } from "oniwalib";
+         buildClientPayload, initAuthCreds, STOCK } from "@oniwa/core";
 
 const [clientT] = mockTransportPair();
 const sock = new NoiseSocket({
@@ -517,9 +517,10 @@ interactive message types are on.
 
 ## License
 
-**Exclusive use of the author and the RTS creators.** Not open source. Do not
-redistribute, publish, or use outside that circle without permission. See
-[`LICENSE`](LICENSE).
+**Apache-2.0** — free to use, modify and redistribute, including commercially.
+The condition is attribution: keep the [`LICENSE`](LICENSE) and
+[`NOTICE`](NOTICE) files and the copyright notices, and don't present a fork
+under the Oniwa name or imply the author endorses it (Apache-2.0 §4 and §6).
 
 Author: **loveless**.
 
