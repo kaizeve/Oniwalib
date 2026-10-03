@@ -61,7 +61,7 @@ export const rtsAdapter: Crypto = {
     const info = opts.info ?? new Uint8Array(0);
     const prk = u8(nodeCrypto.createHmac("sha256", salt).update(ikm).digest());
     const out: number[] = [];
-    let t = new Uint8Array(0);
+    let t: Uint8Array = new Uint8Array(0);
     let counter = 1;
     while (out.length < length) {
       const h = nodeCrypto.createHmac("sha256", prk);

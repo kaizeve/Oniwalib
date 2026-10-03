@@ -41,7 +41,7 @@ export function encodeFrame(payload: Uint8Array): Uint8Array {
 // Decodificador de stream: alimenta bytes, tira frames completos. O TCP entrega
 // pedaços arbitrários, então isto guarda o resto entre chamadas.
 export class FrameDecoder {
-  private buf = new Uint8Array(0);
+  private buf: Uint8Array = new Uint8Array(0);
 
   push(chunk: Uint8Array): Uint8Array[] {
     this.buf = concat(this.buf, chunk);

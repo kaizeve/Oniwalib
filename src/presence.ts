@@ -71,7 +71,7 @@ export function createPresenceLayer(opts: PresenceLayerOptions): PresenceLayer {
       throw new Error("sendPresenceUpdate: composing/recording/paused exigem um toJid");
     }
     const child = type === "recording" ? "composing" : type;
-    const childAttrs = type === "recording" ? { media: "audio" } : {};
+    const childAttrs: Record<string, string> = type === "recording" ? { media: "audio" } : {};
     const attrs: Record<string, string> = { to: toJid };
     const me = meId();
     if (me) attrs.from = me;

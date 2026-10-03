@@ -701,7 +701,7 @@ export function openWhatsApp(opts: OpenOptions): OniConnection {
     creds: auth.creds,
     saveCreds: opts.saveCreds,
     logger,
-    downloadBlob: (ref) => media.downloadEncryptedBlob(ref, "WhatsApp App State Keys"),
+    downloadBlob: (ref) => media.downloadEncryptedBlob(ref as { directPath?: string; url?: string; mediaKey: Uint8Array; fileEncSha256?: Uint8Array }, "WhatsApp App State Keys"),
   });
   let appStateSynced = false;
 

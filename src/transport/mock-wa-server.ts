@@ -53,7 +53,7 @@ export class MockWaServer {
   private s: { publicKey: Uint8Array; privateKey: Uint8Array };
   private dec = new FrameDecoder();
   private introSkipped = false;
-  private intro = new Uint8Array(0);
+  private intro: Uint8Array = new Uint8Array(0);
   private replyHandlers = new Set<(n: BinaryNode) => void>();
   private readyHandlers = new Set<() => void>();
 

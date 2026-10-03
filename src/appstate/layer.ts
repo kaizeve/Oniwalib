@@ -136,7 +136,7 @@ export function createAppStateLayer(o: AppStateLayerOptions): AppStateLayer {
       const name = v.pushNameSetting.name;
       const me = (creds.me ?? {}) as { id?: string; name?: string };
       if (me.name !== name) {
-        creds.me = { ...me, name };
+        creds.me = { ...me, name } as NonNullable<typeof creds.me>;
         void Promise.resolve(o.saveCreds?.()).catch(() => {});
         events.emit("creds.update", { me: creds.me });
       }

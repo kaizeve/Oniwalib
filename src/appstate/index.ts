@@ -25,6 +25,7 @@ import {
   SET,
   REMOVE,
   type MutationKeys,
+  type SyncdOperation,
 } from "./mac";
 import {
   decodeExternalBlobReference,
@@ -430,7 +431,7 @@ export async function encodeSyncdPatch(
   const iv = d.crypto.randomBytes(16);
   const ct = d.crypto.aesCbcEncrypt(keys.valueEncryptionKey, iv, encoded);
   const encValue = concat(iv, ct);
-  const valueMac = generateMac(d.crypto, create.operation, encValue, encKeyId, keys.valueMacKey);
+  const valueMac = generateMac(d.crypto, create.operation as SyncdOperation, encValue, encKeyId, keys.valueMacKey);
   const indexMac = d.crypto.hmacSha256(keys.indexKey, indexBuffer);
 
   const gen = makeLtHashGenerator(next, lt);
