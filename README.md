@@ -522,7 +522,7 @@ The condition is attribution: keep the [`LICENSE`](LICENSE) and
 [`NOTICE`](NOTICE) files and the copyright notices, and don't present a fork
 under the Oniwa name or imply the author endorses it (Apache-2.0 §4 and §6).
 
-Author: **loveless**.
+Author: **Leonardo Kaique Azevedo** ([@kaizeve](https://github.com/kaizeve)).
 
 ---
 

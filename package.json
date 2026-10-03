@@ -68,7 +68,7 @@
     "reviveqr": "node scripts/reviveqr.mjs",
     "sign:registry": "bun scripts/sign-registry.ts"
   },
-  "author": "loveless",
+  "author": "Leonardo Kaique Azevedo (https://github.com/kaizeve)",
   "license": "Apache-2.0",
   "dependencies": {
     "curve25519-js": "^0.0.4",
